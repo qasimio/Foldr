@@ -10,6 +10,7 @@ authors = [
   { name = "Muhammad Qasim", email = "amkassim444@gmail.com" }
 ]
 requires-python = ">=3.9"
+dependencies = []
 
 [project.scripts]
-foldr = "file_organizer.cli:main"
+foldr = "foldr.cli:main"

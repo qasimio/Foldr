@@ -31,7 +31,7 @@ def main():
 
     print(f"\n{base} contains:\n")
     print(f"Total items: {result['total_items']}")
-    print(f"Subfolders: {result['subfolders']}")
+    print(f"Skipped directories: {result['skipped_directories']}")
 
     for name, count in result["categories"].items():
         print(f"{name}: {count}")

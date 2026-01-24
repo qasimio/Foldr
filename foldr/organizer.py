@@ -1,6 +1,6 @@
 import shutil
 from pathlib import Path
-from .config import CATEGORIES_TEMPLATE
+from foldr.config import CATEGORIES_TEMPLATE
 
 
 def organize_folder(base: Path, dry_run: bool = False) -> dict:
@@ -21,8 +21,9 @@ def organize_folder(base: Path, dry_run: bool = False) -> dict:
             cat["folder"].mkdir(exist_ok=True)
 
     destination_folders = {cat["folder"] for cat in categories.values()}
-    folder_count = 0
-    other_types = 0
+
+    skipped_directories = 0
+    other_files = 0
     actions = []
 
     def move_file(destination: Path, source: Path):
@@ -50,7 +51,7 @@ def organize_folder(base: Path, dry_run: bool = False) -> dict:
     for entry in entries:
         if entry.is_dir():
             if entry not in destination_folders:
-                folder_count += 1
+                skipped_directories += 1
             continue
 
         ext = entry.suffix.lower()
@@ -64,7 +65,7 @@ def organize_folder(base: Path, dry_run: bool = False) -> dict:
                 break
 
         if not moved:
-            other_types += 1
+            other_files += 1
 
     if not dry_run:
         for folder in destination_folders:
@@ -73,9 +74,9 @@ def organize_folder(base: Path, dry_run: bool = False) -> dict:
 
     return {
         "total_items": len(entries),
-        "subfolders": folder_count,
-        "categories": {k: v["count"] for k, v in categories.items()},
-        "other_files": other_types,
+        "skipped_directories": skipped_directories,
+        "categories": {name: data["count"] for name, data in categories.items()},
+        "other_files": other_files,
         "actions": actions,
         "dry_run": dry_run,
     }
