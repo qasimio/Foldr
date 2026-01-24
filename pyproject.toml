@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "file-organizer"
+version = "0.1.0"
+description = "Simple file organizer by extension"
+authors = [{ name = "Muhammad Qasim", email = "amkassim444@gmail.com" }]
+dependencies = []
+
+[project.scripts]
+file-organizer = "file_organizer.cli:main"

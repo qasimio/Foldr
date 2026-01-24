@@ -1,0 +1,57 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.venv/
+env.bak/
+venv.bak/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+*.whl
+
+# PyInstaller
+*.manifest
+*.spec
+
+# IDE files
+# VS Code
+.vscode/
+# PyCharm / IntelliJ
+.idea/
+*.iml
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+*.lnk
+
+# Python cache
+*.cache
+.pytest_cache/
+
+# Logs
+*.log
+
+# Deployment
+__pycache__/
+*.pyc
+
+# Env-specific config
+.env
+.env.*
+
+# Ignored lock files (optional, your preference)
+poetry.lock
+pipfile.lock
