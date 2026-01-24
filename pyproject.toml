@@ -1,13 +1,15 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "file-organizer"
+name = "foldr"
 version = "0.1.0"
 description = "Simple file organizer by extension"
-authors = [{ name = "Muhammad Qasim", email = "amkassim444@gmail.com" }]
-dependencies = []
+authors = [
+  { name = "Muhammad Qasim", email = "amkassim444@gmail.com" }
+]
+requires-python = ">=3.9"
 
 [project.scripts]
-file-organizer = "file_organizer.cli:main"
+foldr = "file_organizer.cli:main"

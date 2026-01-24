@@ -37,3 +37,6 @@ def main():
         print(f"{name}: {count}")
 
     print(f"Other files: {result['other_files']}")
+
+if __name__ == "__main__":
+    main()
