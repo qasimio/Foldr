@@ -13,7 +13,7 @@ CATEGORIES_TEMPLATE = {
         "folder": "Text_Data",
         "ext": {
             ".txt", ".md", ".csv", ".json",
-            ".xml", ".yaml", ".yml", ".log"
+            ".xml", ".yaml", ".yml", ".log", "toml"
         },
     },
     "Images": {
