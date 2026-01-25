@@ -1,10 +1,13 @@
 # FOLDR
 
+
 [![PyPI Version](https://img.shields.io/pypi/v/foldr?cacheSeconds=300)](https://pypi.org/project/foldr/)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](#)
-[![License](https://img.shields.io/pypi/l/foldr)](https://github.com/Kas-sim/foldr/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/Kas-sim/foldr/blob/main/LICENSE)
 [![Downloads](https://img.shields.io/pypi/dm/foldr)](https://pypi.org/project/foldr/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#)
+
+
 ##### A safe, fast, and predictable CLI tool to organize files in a directory by file extension.
 
 **FOLDR** is designed to clean up messy folders without touching your existing folder structure. It focuses on files only, with a built-in --dry-run mode so you can see exactly what will happen before anything moves.
