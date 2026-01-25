@@ -4,14 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "foldr"
-version = "0.1.2"
+version = "0.1.3"
 description = "A safe, predictable CLI tool to organize files by extension"
 readme = "README.md"
 authors = [
   { name = "Muhammad Qasim", email = "amkassim444@gmail.com" }
 ]
 requires-python = ">=3.9"
-dependencies = []
+
+dependencies = [
+  "pyfiglet>=1.0.0",
+  "rich>=13.0.0"
+]
 
 classifiers = [
   "License :: OSI Approved :: MIT License",
