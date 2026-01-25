@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "foldr"
-version = "0.1.1"
+version = "0.1.2"
 description = "A safe, predictable CLI tool to organize files by extension"
 readme = "README.md"
 authors = [
@@ -22,6 +22,10 @@ classifiers = [
   "Topic :: Utilities",
   "Topic :: System :: Filesystems"
 ]
+[project.urls]
+"Homepage" = "https://github.com/Kas-sim/Foldr"
+"Source Code" = "https://github.com/Kas-sim/Foldr"
+"Bug Tracker" = "https://github.com/Kas-sim/Foldr/issues"
 
 [project.scripts]
 foldr = "foldr.cli:main"
