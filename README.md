@@ -49,6 +49,15 @@ Example:
 ```
 foldr ~/Downloads --dry-run
 ```
+<br>
+
+> **Note (*paths with spaces*):**  
+> If the directory path contains spaces, wrap it in quotes.
+>
+> Example:
+> ```
+> foldr "D:\My Downloads" --dry-run
+> ```
 
 ---
 

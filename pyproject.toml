@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "foldr"
-version = "0.1.3"
+version = "0.1.4"
 description = "A safe, predictable CLI tool to organize files by extension"
 readme = "README.md"
 authors = [
