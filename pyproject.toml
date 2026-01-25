@@ -5,9 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "foldr"
 version = "0.1.0"
-description = "Simple file organizer by extension"
-authors = [
+description = "A safe, predictable CLI tool to organize files by extention"
+authors = [ 
   { name = "Muhammad Qasim", email = "amkassim444@gmail.com" }
+]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
 ]
 requires-python = ">=3.9"
 dependencies = []
