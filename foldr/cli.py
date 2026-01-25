@@ -11,14 +11,15 @@ def main():
 
     figlet = Figlet(font="slant")
     banner = figlet.renderText("FOLDR")
-
     console.print(banner, style="bold cyan")
+
     console.print(
         Panel.fit(
             "[bold]File Organizer CLI[/bold]\n"
             "Organize files by extension\n\n"
             "[dim]Built by Muhammad Qasim (@Kas-sim)[/dim]\n"
-            "[dim]Run `foldr --help` for usage and examples (paths with spaces must be quoted).[/dim]",
+            "[dim]Run `foldr --help` for usage and examples "
+            "(paths with spaces must be quoted).[/dim]",
             border_style="cyan"
         )
     )
@@ -40,6 +41,7 @@ def main():
         type=Path,
         help="Directory to organize"
     )
+
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -54,27 +56,28 @@ def main():
                 "[bold red]Invalid path format detected.[/bold red]\n\n"
                 "It looks like your directory path contains spaces but was not wrapped in quotes.\n\n"
                 "[bold]Correct usage:[/bold]\n"
-                "  foldr \"D:\\Devshelf videos\"\n\n"
+                "  foldr \"D:\\Devshelf videos\" --dry-run\n\n"
                 "[dim]Shells treat spaces as separators unless the path is quoted.[/dim]",
                 border_style="red"
             )
-    )
-    raise SystemExit(2)
+        )
+        raise SystemExit(2)
 
     base = args.path.expanduser().resolve()
 
-    if not base.exists():
+    if not base.exists() or not base.is_dir():
         console.print(
             Panel.fit(
-                "[bold red]Invalid path provided.[/bold red]\n\n"
-                "If your directory path contains spaces, make sure to wrap it in quotes.\n\n"
+                "[bold red]Invalid directory path.[/bold red]\n\n"
+                "Make sure the path exists and is a directory.\n"
+                "If it contains spaces, wrap it in quotes.\n\n"
                 "Example:\n"
                 "  foldr \"D:\\My Downloads\" --dry-run",
                 border_style="red"
             )
-    )
-    raise SystemExit(1)
-    
+        )
+        raise SystemExit(1)
+
     result = organize_folder(base, dry_run=args.dry_run)
 
     mode = "DRY RUN" if args.dry_run else "EXECUTED"
