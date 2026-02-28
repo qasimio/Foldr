@@ -4,7 +4,9 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/qasimio/foldr/blob/main/LICENSE)
 [![Downloads](https://img.shields.io/pypi/dm/foldr)](https://pypi.org/project/foldr/)
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/foldr?period=total&units=NONE&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/foldr)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#)
+
 
 
 ##### A safe, fast, and predictable CLI tool to organize files in a directory by file extension.
