@@ -5,17 +5,26 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/qasimio/foldr/blob/main/LICENSE)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/foldr?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLUE&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/foldr)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#)
+[![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-pink?logo=github)](https://github.com/sponsors/qasimio)
 
+### Safe, fast, and predictable CLI file organizer.
 
+**FOLDR** cleans messy directories by organizing files into categorized folders  
+without modifying existing folder structures.
 
-##### A safe, fast, and predictable CLI tool to organize files in a directory by file extension.
+Preview everything safely using `--dry-run` before any file is moved.
 
-**FOLDR** is designed to clean up messy folders without touching your existing folder structure. It focuses on files only, with a built-in --dry-run mode so you can see exactly what will happen before anything moves.
+---
 
---- 
+## Quick Example
+
+```bash
+foldr ~/Downloads --dry-run
+```
+
+---
 
 ### Features
-<br>
 
 - Organizes files by extension into clear categories
 - Never modifies or moves existing folders
@@ -25,37 +34,49 @@
 
 ---
 
-### Installation
-<br>
+## Support
 
-```
+If **FOLDR** saves you time or is useful in your workflow,
+consider supporting continued development:
+
+❤️ https://github.com/sponsors/qasimio
+
+---
+
+### Installation
+
+```bash
 pip install foldr
 ```
 
 Requires Python 3.9+.
 
 ---
+
 ### Usage
-<br>
 
 Organize a directory:
-```
+
+```bash
 foldr <directory>
 ```
+
 Preview actions without moving files:
-```
+
+```bash
 foldr <directory> --dry-run
 ```
+
 Example:
-```
+
+```bash
 foldr ~/Downloads --dry-run
 ```
-<br>
 
-> **Note (*paths with spaces*):**  
-> If the directory path contains spaces, wrap it in quotes.
+> **Note (paths with spaces):**
 >
-> Example:
+> Wrap paths containing spaces in quotes.
+>
 > ```
 > foldr "D:\My Downloads" --dry-run
 > ```
@@ -63,22 +84,18 @@ foldr ~/Downloads --dry-run
 ---
 
 ### How It Works
-<br>
 
 - Files are grouped into predefined categories based on extension
-- Category folders are created only if needed
-- If a filename already exists, FOLDR safely renames the file
+- Category folders are created only when needed
+- Existing filenames are safely renamed if conflicts occur
 - Directories are detected, counted, and left untouched
 
 ---
 
 ### Safety First
-<br>
 
-Folders are never modified
-
-- Use ```--dry-run``` to preview changes
-
+- Folders are never modified
+- Use `--dry-run` to preview changes
 - No recursive behavior (by design)
 
 Future versions may introduce optional recursive mode.
@@ -86,7 +103,6 @@ Future versions may introduce optional recursive mode.
 ---
 
 ### Example Output
-<br>
 
 ```
 Mode: DRY RUN
@@ -106,25 +122,22 @@ Other files: 2
 ---
 
 ### Roadmap
-<br>
 
-- Optional ```--recursive``` flag
-
+- Optional `--recursive` flag
 - User-defined category configuration
-
 - Exclusion rules
 
 ---
 
 ### Author
 
-**Muhammad Qasim** 
+**Muhammad Qasim**
 
-GitHub: https://github.com/qasimio
+GitHub: https://github.com/qasimio  
 LinkedIn: https://www.linkedin.com/in/qasimio/
 
 ---
 
 ### License
 
-**MIT License**
+MIT License
