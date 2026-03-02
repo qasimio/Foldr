@@ -17,7 +17,7 @@ def main():
         Panel.fit(
             "[bold]File Organizer CLI[/bold]\n"
             "Organize files by extension\n\n"
-            "[dim]Built by Muhammad Qasim (@Kas-sim)[/dim]\n"
+            "[dim]Built by Muhammad Qasim (@qasimio)[/dim]\n"
             "[dim]Run `foldr --help` for usage and examples "
             "(paths with spaces must be quoted).[/dim]",
             border_style="cyan"

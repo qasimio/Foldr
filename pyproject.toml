@@ -27,9 +27,9 @@ classifiers = [
   "Topic :: System :: Filesystems"
 ]
 [project.urls]
-"Homepage" = "https://github.com/Kas-sim/Foldr"
-"Source Code" = "https://github.com/Kas-sim/Foldr"
-"Bug Tracker" = "https://github.com/Kas-sim/Foldr/issues"
+"Homepage" = "https://github.com/qasimio/Foldr"
+"Source Code" = "https://github.com/qasimio/Foldr"
+"Bug Tracker" = "https://github.com/qasimio/Foldr/issues"
 
 [project.scripts]
 foldr = "foldr.cli:main"

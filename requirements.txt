@@ -3,7 +3,7 @@ certifi==2026.1.4
 charset-normalizer==3.4.4
 colorama==0.4.6
 docutils==0.22.4
--e git+https://github.com/Kas-sim/Foldr.git@a2304e82c8faa571185f6f30065a1a36fcbafb13#egg=foldr
+-e git+https://github.com/qasimio/Foldr.git@a2304e82c8faa571185f6f30065a1a36fcbafb13#egg=foldr
 id==1.5.0
 idna==3.11
 jaraco.classes==3.4.0
