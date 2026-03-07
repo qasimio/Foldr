@@ -1,64 +1,157 @@
 """
 foldr.cli
 ~~~~~~~~~
-FOLDR v4 — Full CLI with world-class TUI.
+FOLDR v4 — Clean CLI.
 
-Subcommand dispatch happens BEFORE argparse so subcommands are never
-accidentally eaten as the positional <path> argument.
+No Rich, no pyfiglet, no curses.
+Uses foldr.tui for interactive screens, foldr.term for plain output.
 
-Commands
---------
-  foldr [path]                        organize (interactive TUI on TTY)
-  foldr [path] --dry-run              preview only
-  foldr [path] --recursive [-d N]
-  foldr [path] --deduplicate <strat>
-  foldr [path] --ignore "*.log" ...
-  foldr [path] --config file.toml
-  foldr [path] --verbose / --quiet
-  foldr [path] --no-interactive       skip TUI, plain prompts
-  foldr watch [path]
-  foldr undo [--id ID] [--dry-run]
-  foldr history [--all]
+Subcommand routing is done BEFORE argparse so 'watch', 'undo', 'history'
+are never swallowed as the positional <path> argument.
 """
 from __future__ import annotations
-
-import argparse
-import os
-import signal
-import sys
-import time
-import threading
+import argparse, os, sys, time, threading
 from pathlib import Path
 
-from foldr import output as out
-from foldr.ansi import term_size, BCYAN, BGREEN, BYELLOW, BRED, BWHITE, MUTED, RESET, BOLD
-from foldr.config_loader import load_template
-from foldr.dedup import collect_files, find_duplicates, resolve_strategy
-from foldr.empty_dirs import remove_empty_dirs, scan_empty_dirs
-from foldr.history import (
-    get_history_entry, get_latest_history,
-    list_history, save_history, undo_operation,
+from foldr.term import (
+    is_tty, term_wh, cat_fg, cat_icon, fmt_size, strip, vlen, pad_to,
+    pbar, SPINNER, RESET, BOLD, DIM, MUTED,
+    BCYN, CYN, BGRN, BYLW, BRED, BWHT, WHT, BBLK,
+    bg256, rgb_bg, rgb_fg,
 )
-from foldr.models import DedupeStrategy
-from foldr.organizer import organize_folder
+from foldr.config_loader  import load_template
+from foldr.dedup          import collect_files, find_duplicates, resolve_strategy
+from foldr.empty_dirs     import remove_empty_dirs, scan_empty_dirs
+from foldr.history        import (get_history_entry, get_latest_history,
+                                   list_history, save_history, undo_operation)
+from foldr.models         import DedupeStrategy
+from foldr.organizer      import organize_folder
 
+# ── Global flags (set in main) ────────────────────────────────────────────────
+_QUIET        = False
+_NO_INTER     = False
+_TUI_ALLOWED  = False      # True only when TTY + not --no-interactive
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TTY detection
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Output helpers ─────────────────────────────────────────────────────────────
+def _w() -> int: return min(100, term_wh()[0])
 
-def _is_tty() -> bool:
-    return (
-        sys.stdout.isatty()
-        and sys.stdin.isatty()
-        and os.environ.get("TERM", "dumb") != "dumb"
+def _rule(title: str = "", col: str = BCYN) -> None:
+    if _QUIET: return
+    w = _w()
+    if not title:
+        print(col + "─"*w + RESET); return
+    side = max(1,(w-len(title)-2)//2)
+    print(col+"─"*side+RESET+f" {BOLD}{title}{RESET} "+col+"─"*side+RESET)
+
+def _banner() -> None:
+    if _QUIET: return
+    cols = [BCYN+BOLD, BCYN+BOLD, CYN+BOLD, CYN, BCYN, BCYN]
+    rows = [
+        " ███████╗ ██████╗ ██╗     ██████╗ ██████╗ ",
+        " ██╔════╝██╔═══██╗██║     ██╔══██╗██╔══██╗",
+        " █████╗  ██║   ██║██║     ██║  ██║██████╔╝",
+        " ██╔══╝  ██║   ██║██║     ██║  ██║██╔══██╗",
+        " ██║     ╚██████╔╝███████╗██████╔╝██║  ██║",
+        " ╚═╝      ╚═════╝ ╚══════╝╚═════╝ ╚═╝  ╚═╝",
+    ]
+    print()
+    for c, r in zip(cols, rows): print(f"  {c}{r}{RESET}")
+    print(f"\n  {MUTED}v4  ·  Smart File Organizer  ·  github.com/qasimio/Foldr{RESET}\n")
+
+def _panel(body: str, title: str = "", col: str = BCYN) -> None:
+    if _QUIET: return
+    w     = _w()
+    inner = w - 4
+    lines = body.split("\n")
+    t = f" {title} " if title else ""
+    tl= len(t)
+    if tl and tl < inner-2:
+        pad_l = (inner-tl)//2
+        pad_r = inner-tl-pad_l
+        top = col+"╭"+"─"*pad_l+BOLD+t+RESET+col+"─"*pad_r+"╮"+RESET
+    else:
+        top = col+"╭"+"─"*inner+"╮"+RESET
+    print(top)
+    for line in lines:
+        lv   = vlen(line)
+        rest = max(0, inner-lv-2)
+        print(col+"│"+RESET+"  "+line+" "*rest+"  "+col+"│"+RESET)
+    print(col+"╰"+"─"*inner+"╯"+RESET)
+
+def _ok(msg: str)   -> None:
+    if not _QUIET: print(f"  {BGRN}✓{RESET}  {msg}")
+def _warn(msg: str) -> None:
+    if not _QUIET: print(f"  {BYLW+BOLD}⚠{RESET}  {msg}")
+def _err(msg: str)  -> None:
+    print(f"  {BRED+BOLD}✗  Error:{RESET}  {msg}", file=sys.stderr)
+def _dim(msg: str)  -> None:
+    if not _QUIET: print(f"  {MUTED}{msg}{RESET}")
+def _info(msg: str) -> None:
+    if not _QUIET: print(f"  {BCYN}ℹ{RESET}  {msg}")
+
+def _summary(cat_counts: dict, moved: int, other: int, ignored: int,
+             elapsed: float, dry_run: bool) -> None:
+    if _QUIET: return
+    if not cat_counts: return
+    w      = _w()
+    bar_w  = max(12, w//4)
+    total  = max(1, sum(cat_counts.values()))
+    _rule("Summary")
+    print()
+    for cat, cnt in sorted(cat_counts.items(), key=lambda x:-x[1]):
+        if cnt == 0: continue
+        col  = cat_fg(cat)
+        icon = cat_icon(cat)
+        pct  = cnt/total
+        fill = max(1, int(pct*bar_w))
+        bar  = col+"█"*fill+MUTED+"░"*(bar_w-fill)+RESET
+        print(f"  {col}{icon} {pad_to(cat,18)}{RESET}  {bar}  {col+BOLD}{cnt:>4}{RESET}  {MUTED}{pct*100:4.1f}%{RESET}")
+    print()
+    status = f"{BYLW+BOLD}● DRY RUN — no files were moved{RESET}" if dry_run else f"{BGRN+BOLD}✓ Files organized successfully{RESET}"
+    _panel(
+        f"  {status}\n\n"
+        f"  {BCYN+BOLD}{moved}{RESET} moved  {MUTED}·{RESET}  "
+        f"{BWHT}{other}{RESET} unrecognised  {MUTED}·{RESET}  "
+        f"{BWHT}{ignored}{RESET} ignored  {MUTED}·{RESET}  {MUTED}{elapsed:.2f}s{RESET}",
+        col=BYLW if dry_run else BGRN,
     )
+    print()
 
+def _confirm_plain(prompt: str, default: bool = False) -> bool:
+    yn = f"[{'Y' if default else 'y'}/{'n' if default else 'N'}]"
+    sys.stdout.write(f"\n  {BYLW+BOLD}?{RESET}  {BOLD}{prompt}{RESET}  {MUTED}{yn}{RESET}: ")
+    sys.stdout.flush()
+    try:
+        ans = input().strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print(); return False
+    return (ans in ("y","yes")) if ans else default
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Argument parsing
-# ─────────────────────────────────────────────────────────────────────────────
+def _plain_preview(preview, dry: bool) -> None:
+    """Fallback plain-text preview when TUI unavailable."""
+    try:
+        from tabulate import tabulate
+        rows = [[r.filename, f"→ {Path(r.destination).parent.name}/", r.category]
+                for r in preview.records[:60]]
+        print()
+        print(tabulate(rows, headers=["File","Destination","Category"],
+                       tablefmt="rounded_outline", maxcolwidths=[40,25,18]))
+        n = len(preview.records)
+        if n > 60: _dim(f"… and {n-60} more files")
+    except ImportError:
+        for r in preview.records[:30]:
+            dest = Path(r.destination).parent.name
+            col  = cat_fg(r.category)
+            icon = cat_icon(r.category)
+            print(f"  {col}{icon}{RESET}  {col+BOLD}{r.filename:<40}{RESET}  {MUTED}→{RESET}  {col}{dest}/{RESET}")
+    print()
+    n = len(preview.records)
+    if dry:
+        _warn(f"DRY RUN — {BYLW+BOLD}{n}{RESET} files would be moved. Nothing changed.")
+    else:
+        _info(f"{n} files will be moved.")
 
+# ── Argument parser ────────────────────────────────────────────────────────────
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="foldr",
@@ -70,655 +163,398 @@ def _build_parser() -> argparse.ArgumentParser:
             "  foldr ~/Downloads --dry-run\n"
             "  foldr ~/Downloads --recursive --max-depth 3\n"
             "  foldr ~/Downloads --deduplicate keep-newest\n"
-            "  foldr ~/Downloads --ignore '*.tmp' 'node_modules/'\n"
             "  foldr watch ~/Downloads\n"
             "  foldr undo\n"
-            "  foldr undo --id a1b2c3\n"
             "  foldr history\n"
-            "  foldr history --all\n"
         ),
     )
-    p.add_argument("path", nargs="?", help="Directory to organize")
-    p.add_argument("--dry-run",    action="store_true",
-                   help="Preview — no files are moved")
-    p.add_argument("--recursive",  action="store_true",
-                   help="Recurse into subdirectories")
-    p.add_argument("--max-depth",  type=int, metavar="N",
-                   help="Max recursion depth (requires --recursive)")
-    p.add_argument("--follow-symlinks", action="store_true",
-                   help="Follow symbolic links when recursing")
-    p.add_argument("--smart",      action="store_true",
-                   help="MIME detection (catches spoofed extensions)")
+    p.add_argument("path",  nargs="?")
+    p.add_argument("--dry-run",         action="store_true")
+    p.add_argument("--recursive",       action="store_true")
+    p.add_argument("--max-depth",       type=int, metavar="N")
+    p.add_argument("--follow-symlinks", action="store_true")
+    p.add_argument("--smart",           action="store_true")
     p.add_argument("--deduplicate",
-                   choices=["keep-newest", "keep-largest", "keep-oldest"],
-                   metavar="{keep-newest,keep-largest,keep-oldest}",
-                   help="Find and remove duplicate files")
-    p.add_argument("--ignore", nargs="+", metavar="PATTERN",
-                   help="Ignore patterns  e.g. '*.log' 'tmp/'")
-    p.add_argument("--config", metavar="FILE",
-                   help="Path to custom TOML config")
-    p.add_argument("--verbose",    action="store_true")
-    p.add_argument("--quiet",      action="store_true",
-                   help="Suppress all non-error output")
-    p.add_argument("--no-interactive", action="store_true",
-                   help="Disable TUI (plain text output)")
-    # undo / history flags
-    p.add_argument("--id",  help="History entry ID for undo")
-    p.add_argument("--all", action="store_true",
-                   help="Show full history (foldr history --all)")
+                   choices=["keep-newest","keep-largest","keep-oldest"],
+                   metavar="{keep-newest,keep-largest,keep-oldest}")
+    p.add_argument("--ignore", nargs="+", metavar="PATTERN")
+    p.add_argument("--config", metavar="FILE")
+    p.add_argument("--verbose",          action="store_true")
+    p.add_argument("--quiet",            action="store_true")
+    p.add_argument("--no-interactive",   action="store_true")
+    p.add_argument("--id",               help="History entry ID for undo")
+    p.add_argument("--all",              action="store_true")
     return p
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Template loading
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _load_template(config_arg: str | None, quiet: bool) -> dict | None:
+def _load_template(config_arg, quiet):
     if config_arg:
-        config_path = Path(config_arg)
         try:
-            template, label = load_template(config_path)
-            if not quiet:
-                out.dim(f"Config: {label}")
-            return template
+            tmpl, label = load_template(Path(config_arg))
+            if not quiet: _dim(f"Config: {label}")
+            return tmpl
         except FileNotFoundError as e:
-            out.error(str(e))
-            sys.exit(1)
-    else:
-        template, label = load_template(None)
-        if label and not quiet:
-            out.dim(f"Config: {label}")
-        return template
+            _err(str(e)); sys.exit(1)
+    tmpl, label = load_template(None)
+    if label and not quiet: _dim(f"Config: {label}")
+    return tmpl
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# watch
-# ─────────────────────────────────────────────────────────────────────────────
-
-def cmd_watch(raw_argv: list[str], args: argparse.Namespace) -> None:
-    # Extract the watch target directory from raw argv
+# ── watch ──────────────────────────────────────────────────────────────────────
+def cmd_watch(raw_argv: list[str], args) -> None:
     try:
         wi = raw_argv.index("watch")
-        candidates = [a for a in raw_argv[wi+1:] if not a.startswith("-")]
-        target_str = candidates[0] if candidates else None
+        cands = [a for a in raw_argv[wi+1:] if not a.startswith("-")]
+        target_str = cands[0] if cands else None
     except (ValueError, IndexError):
         target_str = None
-
     target = Path(target_str).resolve() if target_str else Path.cwd()
     if not target.is_dir():
-        out.error(f"'{target}' is not a valid directory.")
-        sys.exit(1)
-
-    template = _load_template(getattr(args, "config", None), args.quiet)
-
+        _err(f"'{target}' is not a valid directory."); sys.exit(1)
+    tmpl = _load_template(getattr(args,"config",None), args.quiet)
     from foldr.watch import run_watch
-    run_watch(
-        base=target,
-        template=template or {},
-        dry_run=args.dry_run,
-        extra_ignore=args.ignore or [],
-        use_tui=_is_tty() and not args.no_interactive,
+    run_watch(base=target, template=tmpl or {},
+              dry_run=args.dry_run, extra_ignore=args.ignore or [],
+              use_tui=_TUI_ALLOWED)
+
+# ── undo ───────────────────────────────────────────────────────────────────────
+def cmd_undo(args) -> None:
+    _rule("Undo")
+    log = (get_history_entry(args.id) if getattr(args,"id",None)
+           else get_latest_history())
+    if not log:
+        _warn("No history found — nothing to undo."); return
+    ts    = log.get("timestamp","")[:19].replace("T"," ")
+    base  = log.get("base","")
+    total = log.get("total_files",0)
+    eid   = log.get("id","?")
+    _panel(
+        f"  {BCYN+BOLD}ID:{RESET}        {eid}\n"
+        f"  {BCYN+BOLD}Time:{RESET}      {ts}\n"
+        f"  {BCYN+BOLD}Directory:{RESET} {base}\n"
+        f"  {BCYN+BOLD}Files:{RESET}     {total}",
+        title="Undo Preview", col=BYLW,
     )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# undo
-# ─────────────────────────────────────────────────────────────────────────────
-
-def cmd_undo(args: argparse.Namespace) -> None:
-    if not args.quiet:
-        out.rule("Undo")
-
-    log_data = (
-        get_history_entry(args.id) if getattr(args, "id", None)
-        else get_latest_history()
-    )
-
-    if not log_data:
-        out.warn("No history found — nothing to undo.")
-        return
-
-    ts    = log_data.get("timestamp", "")[:19].replace("T", " ")
-    base  = log_data.get("base", "")
-    total = log_data.get("total_files", 0)
-    eid   = log_data.get("id", "?")
-
-    if not args.quiet:
-        out.panel(
-            f"  {BCYAN}{BOLD}ID:{RESET}        {eid}\n"
-            f"  {BCYAN}{BOLD}Time:{RESET}      {ts}\n"
-            f"  {BCYAN}{BOLD}Directory:{RESET} {base}\n"
-            f"  {BCYAN}{BOLD}Files:{RESET}     {total}",
-            title="Undo Preview",
-            col=BYELLOW,
-        )
-
-    dry = args.dry_run
-    if not dry and not args.quiet:
-        if _is_tty() and not args.no_interactive:
-            from foldr.tui    import PreviewScreen
-            from foldr.screen import Screen
-            from foldr.widgets import confirm_dialog
-            scr = Screen()
-            scr.enter_alt()
+    if not args.dry_run:
+        if _TUI_ALLOWED:
+            from foldr.tui import confirm_dialog, Screen as _Scr
+            scr = _Scr(); scr.enter()
             try:
-                confirmed = confirm_dialog(
-                    scr,
-                    title=" ↩ Undo Operation ",
-                    body=[
-                        f"{BWHITE}Restore {BCYAN}{BOLD}{total}{RESET}{BWHITE} files{RESET}",
-                        f"{BWHITE}from operation {BCYAN}{BOLD}{eid}{RESET}",
-                        "",
-                        f"{MUTED}Files move back to their original locations.{RESET}",
-                        f"{MUTED}Use  foldr history  to view all operations.{RESET}",
-                    ],
-                    yes=" ↩ Undo ",
-                    no=" ✗ Cancel ",
-                    danger=True,
-                )
+                confirmed = confirm_dialog(scr, " ↩ Undo Operation ",
+                    [f"{BWHT}Restore {BCYN+BOLD}{total}{RESET+BWHT} files from op {BCYN+BOLD}{eid}{RESET}",
+                     f"{MUTED}Files move back to original locations.{RESET}"],
+                    yes_label=" ↩ Undo ", no_label=" ✗ Cancel ", danger=True)
             finally:
-                scr.exit_alt()
+                scr.exit()
         else:
-            confirmed = out.confirm_prompt(
-                f"Restore {total} files from operation {eid}?",
-                default=False,
-            )
+            confirmed = _confirm_plain(f"Restore {total} files from op {eid}?", default=False)
         if not confirmed:
-            out.dim("Cancelled.")
-            return
+            _dim("Cancelled."); return
+    result = undo_operation(log, dry_run=args.dry_run)
+    pfx = f"  {BYLW}[DRY]{RESET}" if args.dry_run else ""
+    for r in result.restored: print(f"{pfx}  {BGRN}↩{RESET}  {r}")
+    for s in result.skipped:  _warn(s)
+    for e in result.errors:   _err(e)
+    print(f"\n  {BGRN+BOLD}{len(result.restored)}{RESET} restored  "
+          f"{MUTED}·{RESET}  {BYLW}{len(result.skipped)}{RESET} skipped  "
+          f"{MUTED}·{RESET}  {BRED}{len(result.errors)}{RESET} errors")
 
-    result = undo_operation(log_data, dry_run=dry)
-
-    prefix = f"  {BYELLOW}[DRY]{RESET}" if dry else ""
-    for r in result.restored:
-        print(f"{prefix}  {BGREEN}↩{RESET}  {r}")
-    for s in result.skipped:
-        out.warn(s)
-    for e in result.errors:
-        out.error(e)
-
-    if not args.quiet:
-        print()
-        print(
-            f"  {BGREEN}{BOLD}{len(result.restored)}{RESET} restored  "
-            f"{MUTED}·{RESET}  "
-            f"{BYELLOW}{len(result.skipped)}{RESET} skipped  "
-            f"{MUTED}·{RESET}  "
-            f"{BRED}{len(result.errors)}{RESET} errors"
-        )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# history
-# ─────────────────────────────────────────────────────────────────────────────
-
-def cmd_history(args: argparse.Namespace) -> None:
-    limit   = None if getattr(args, "all", False) else 50
+# ── history ────────────────────────────────────────────────────────────────────
+def cmd_history(args) -> None:
+    limit   = None if getattr(args,"all",False) else 50
     entries = list_history(limit=limit or 50)
-
     if not entries:
-        out.warn("No history found.")
-        return
-
-    if _is_tty() and not args.no_interactive and not args.quiet:
+        _warn("No history found."); return
+    if _TUI_ALLOWED:
         from foldr.tui import HistoryScreen
-        scr = HistoryScreen(entries)
-        action, eid = scr.run()
+        action, eid = HistoryScreen(entries).run()
         if action == "undo" and eid:
-            args.id = eid
-            cmd_undo(args)
+            args.id = eid; cmd_undo(args)
         return
-
-    # Plain-text fallback
-    out.rule("Operation History")
-    print()
-    from tabulate import tabulate
-    rows = []
-    for e in entries:
-        ts    = e.get("timestamp", "")[:19].replace("T", " ")
-        base  = Path(e.get("base", "?")).name
-        total = e.get("total_files", 0)
-        eid   = e.get("id", "?")[:6]
-        rows.append([eid, ts, base, str(total)])
-    print(tabulate(rows, headers=["ID", "Time", "Directory", "Files"],
-                   tablefmt="rounded_outline"))
+    _rule("Operation History"); print()
+    try:
+        from tabulate import tabulate
+        rows = [[e.get("id","?")[:6],
+                 e.get("timestamp","")[:19].replace("T"," "),
+                 Path(e.get("base","?")).name,
+                 str(e.get("total_files",0))] for e in entries]
+        print(tabulate(rows, headers=["ID","Time","Directory","Files"], tablefmt="rounded_outline"))
+    except ImportError:
+        for e in entries:
+            print(f"  {BCYN}{e.get('id','?')[:6]}{RESET}  {e.get('timestamp','')[:19]}  {Path(e.get('base','?')).name}  {e.get('total_files',0)} files")
     print()
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# deduplicate
-# ─────────────────────────────────────────────────────────────────────────────
-
-def cmd_deduplicate(target: Path, strategy_str: str,
-                    recursive: bool, max_depth: int | None,
-                    dry_run: bool, quiet: bool,
-                    no_interactive: bool) -> None:
-    strategy_map = {
-        "keep-newest":  DedupeStrategy.KEEP_NEWEST,
-        "keep-oldest":  DedupeStrategy.KEEP_OLDEST,
-        "keep-largest": DedupeStrategy.KEEP_LARGEST,
-    }
-    strategy = strategy_map[strategy_str]
-
-    if not quiet:
-        out.rule("Duplicate Detection")
-        out.info(f"Scanning {target} …")
-
+# ── deduplicate ────────────────────────────────────────────────────────────────
+def cmd_dedup(target, strat_str, recursive, max_depth, dry_run, verbose) -> None:
+    strategy_map = {"keep-newest": DedupeStrategy.KEEP_NEWEST,
+                    "keep-oldest": DedupeStrategy.KEEP_OLDEST,
+                    "keep-largest": DedupeStrategy.KEEP_LARGEST}
+    strategy = strategy_map[strat_str]
+    _rule("Duplicate Detection")
+    _info(f"Scanning {target} …")
     files  = collect_files(target, recursive=recursive, max_depth=max_depth)
     groups = find_duplicates(files)
-
     if not groups:
-        out.success("No duplicates found!")
-        return
-
-    total_removable = sum(len(g.files) - 1 for g in groups)
-    out.warn(
-        f"Found {len(groups)} duplicate groups "
-        f"({total_removable} files removable)"
-    )
+        _ok("No duplicates found!"); return
+    total_rem = sum(len(g.files)-1 for g in groups)
+    _warn(f"Found {len(groups)} duplicate groups  ({total_rem} files removable)")
+    for g in groups: resolve_strategy(g, strategy)
+    try:
+        from tabulate import tabulate
+        rows = [[g.keep.name if g.keep else "?", rem.name,
+                 fmt_size(g.keep.stat().st_size if g.keep and g.keep.exists() else 0)]
+                for g in groups[:40] for rem in g.remove]
+        print("\n" + tabulate(rows, headers=["Keep","Remove","Size"], tablefmt="rounded_outline"))
+    except ImportError:
+        for g in groups[:20]:
+            for rem in g.remove:
+                print(f"  {BGRN}keep:{RESET} {g.keep.name if g.keep else '?'}  {BRED}del:{RESET} {rem.name}")
+    if total_rem > 40: _dim(f"… and {total_rem-40} more")
     print()
-
-    for g in groups:
-        resolve_strategy(g, strategy)
-
-    # Preview table
-    from tabulate import tabulate
-    rows = []
-    for g in groups[:40]:
-        keep = g.keep.name if g.keep else "?"
-        size = g.keep.stat().st_size if g.keep and g.keep.exists() else 0
-        for rem in g.remove:
-            rows.append([keep, rem.name, out.fmt_size(size) if hasattr(out, "fmt_size") else str(size)])
-    from foldr.ansi import fmt_size
-    rows2 = []
-    for g in groups[:40]:
-        keep = g.keep.name if g.keep else "?"
-        size = g.keep.stat().st_size if g.keep and g.keep.exists() else 0
-        for rem in g.remove:
-            rows2.append([keep, rem.name, fmt_size(size)])
-    print(tabulate(rows2, headers=["Keep", "Remove", "Size"],
-                   tablefmt="rounded_outline"))
-    if total_removable > 40:
-        out.dim(f"… and {total_removable - 40} more")
-    print()
-
     if dry_run:
-        out.warn(f"DRY RUN — {total_removable} files would be removed.")
-        return
-
-    if _is_tty() and not no_interactive:
-        from foldr.screen  import Screen
-        from foldr.widgets import confirm_dialog
-        scr = Screen()
-        scr.enter_alt()
+        _warn(f"DRY RUN — {total_rem} files would be removed."); return
+    if _TUI_ALLOWED:
+        from foldr.tui import confirm_dialog, Screen as _Scr
+        scr = _Scr(); scr.enter()
         try:
-            confirmed = confirm_dialog(
-                scr,
-                title=" 🗑  Remove Duplicates ",
-                body=[
-                    f"{BWHITE}Delete {BRED}{BOLD}{total_removable}{RESET}{BWHITE} duplicate files?{RESET}",
-                    f"{BWHITE}Strategy: {BCYAN}{strategy_str}{RESET}",
-                    "",
-                    f"{MUTED}The 'keep' file is NOT deleted.{RESET}",
-                    f"{MUTED}This operation cannot be undone via 'foldr undo'.{RESET}",
-                ],
-                yes=" 🗑 Delete ",
-                no=" ✗ Cancel ",
-                danger=True,
-            )
+            confirmed = confirm_dialog(scr, " 🗑 Remove Duplicates ",
+                [f"{BWHT}Delete {BRED+BOLD}{total_rem}{RESET+BWHT} duplicate files?{RESET}",
+                 f"{BWHT}Strategy: {BCYN}{strat_str}{RESET}",
+                 f"{MUTED}⚠ Cannot be undone via 'foldr undo'{RESET}"],
+                yes_label=" 🗑 Delete ", no_label=" ✗ Cancel ", danger=True)
         finally:
-            scr.exit_alt()
+            scr.exit()
     else:
-        confirmed = out.confirm_prompt(
-            f"Delete {total_removable} duplicate files?", default=False
-        )
-
+        confirmed = _confirm_plain(f"Delete {total_rem} duplicate files?", default=False)
     if not confirmed:
-        out.dim("Cancelled.")
-        return
-
+        _dim("Cancelled."); return
     removed = 0
     for g in groups:
-        for path in g.remove:
-            try:
-                path.unlink()
-                removed += 1
-            except OSError as e:
-                out.error(f"Could not remove {path.name}: {e}")
+        for p in g.remove:
+            try: p.unlink(); removed += 1
+            except OSError as e: _err(f"Could not remove {p.name}: {e}")
+    _ok(f"Removed {removed} duplicate files.")
 
-    out.success(f"Removed {removed} duplicate files.")
+# ── main organize ──────────────────────────────────────────────────────────────
+def cmd_organize(target: Path, args, template) -> None:
+    dry   = args.dry_run
 
+    _rule(f"Scanning  {target.name}")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# main organize flow
-# ─────────────────────────────────────────────────────────────────────────────
-
-def cmd_organize(target: Path, args: argparse.Namespace, template: dict | None) -> None:
-    use_tui = _is_tty() and not args.no_interactive and not args.quiet
-    dry     = args.dry_run
-    quiet   = args.quiet
-
-    if not quiet:
-        out.rule(f"Scanning  {target.name}")
-
-    # ── Scan phase (always dry-run first to collect planned actions) ────────
-    t_scan = time.monotonic()
+    # Scan with spinner
     spinner_done = threading.Event()
-
-    if not quiet and not use_tui:
+    if not _QUIET and not is_tty():
         def _spin():
-            frames = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
             i = 0
             while not spinner_done.is_set():
-                sys.stdout.write(f"\r  {BCYAN}{frames[i%10]}{RESET}  Scanning…")
-                sys.stdout.flush()
-                time.sleep(0.08)
-                i += 1
-            sys.stdout.write("\r" + " " * 30 + "\r")
-            sys.stdout.flush()
+                sys.stdout.write(f"\r  {BCYN}{SPINNER[i%10]}{RESET}  Scanning…")
+                sys.stdout.flush(); time.sleep(0.08); i += 1
+            sys.stdout.write("\r"+" "*30+"\r"); sys.stdout.flush()
         threading.Thread(target=_spin, daemon=True).start()
 
+    t0 = time.monotonic()
     preview = organize_folder(
         base=target, dry_run=True,
-        recursive=args.recursive,
-        max_depth=args.max_depth,
+        recursive=args.recursive, max_depth=args.max_depth,
         follow_symlinks=args.follow_symlinks,
         extra_ignore=args.ignore or [],
         category_template=template,
-        smart=args.smart,
     )
     spinner_done.set()
-    t_scan_done = time.monotonic()
 
-    # ── Nothing to do ────────────────────────────────────────────────────────
     if not preview.actions:
-        out.panel(
-            f"  {BGREEN}{BOLD}✓  Nothing to organize — directory is already tidy!{RESET}",
-            col=BGREEN,
-        )
+        _panel(f"  {BGRN+BOLD}✓  Nothing to organize — directory is already tidy!{RESET}", col=BGRN)
         return
 
-    n_moves = len(preview.records)
+    n = len(preview.records)
 
-    # ── TUI Preview (or plain table) ─────────────────────────────────────────
-    if use_tui:
+    # ── Show preview (TUI or plain) ───────────────────────────────────────────
+    if _TUI_ALLOWED:
         from foldr.tui import PreviewScreen
-        pscr = PreviewScreen(preview.records, target, dry)
-        confirmed = pscr.run()
+        confirmed = PreviewScreen(preview.records, target, dry).run()
     else:
-        # Plain-text preview table
-        if not quiet:
-            _print_plain_preview(preview, dry)
+        _plain_preview(preview, dry)
         if dry:
-            elapsed = t_scan_done - t_scan
-            out.summary_table(
-                {k: v for k, v in preview.categories.items() if v > 0},
-                n_moves, preview.other_files, preview.ignored_files,
-                elapsed, dry_run=True,
-            )
+            _summary({k:v for k,v in preview.categories.items() if v},
+                     n, preview.other_files, preview.ignored_files,
+                     time.monotonic()-t0, dry_run=True)
             return
-        confirmed = out.confirm_prompt(
-            f"Execute {n_moves} moves?", default=True
-        )
+        confirmed = _confirm_plain(f"Execute {n} moves?", default=True)
 
     if not confirmed:
-        out.warn("Cancelled — no files were moved.")
-        print()
-        return
+        _warn("Cancelled — no files were moved."); print(); return
 
-    # ── Dry-run: just show summary, no execution ─────────────────────────────
+    # Dry-run: skip execution entirely
     if dry:
-        elapsed = t_scan_done - t_scan
-        out.summary_table(
-            {k: v for k, v in preview.categories.items() if v > 0},
-            n_moves, preview.other_files, preview.ignored_files,
-            elapsed, dry_run=True,
-        )
+        _summary({k:v for k,v in preview.categories.items() if v},
+                 n, preview.other_files, preview.ignored_files,
+                 time.monotonic()-t0, dry_run=True)
         return
 
-    # ── Execution ────────────────────────────────────────────────────────────
-    if not quiet:
-        out.rule("Executing")
-
+    # ── Execute ────────────────────────────────────────────────────────────────
+    _rule("Executing")
     t_exec = time.monotonic()
 
-    if use_tui:
+    if _TUI_ALLOWED:
         from foldr.tui import ExecutionScreen
-        with ExecutionScreen(n_moves, target, dry_run=False) as exec_scr:
-            # Run organizer in a thread, update screen from main thread
-            result_holder: list = []
-            err_holder:    list = []
+        with ExecutionScreen(n, target) as xs:
+            # Run organizer in background thread, poll for updates
+            result_box: list = []
+            err_box:    list = []
+            done_evt = threading.Event()
 
             def _run():
                 try:
                     r = organize_folder(
                         base=target, dry_run=False,
-                        recursive=args.recursive,
-                        max_depth=args.max_depth,
+                        recursive=args.recursive, max_depth=args.max_depth,
                         follow_symlinks=args.follow_symlinks,
                         extra_ignore=args.ignore or [],
                         category_template=template,
-                        smart=args.smart,
                     )
-                    result_holder.append(r)
+                    result_box.append(r)
                 except Exception as e:
-                    err_holder.append(e)
+                    err_box.append(e)
+                finally:
+                    done_evt.set()
 
             t = threading.Thread(target=_run, daemon=True)
             t.start()
 
-            # Poll progress (organizer doesn't have callbacks yet, so we
-            # watch record count growing via a second preview approach)
-            # For now, animate while waiting
-            frame = 0
-            frames = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
-            while t.is_alive():
-                exec_scr.scr.resize()
-                exec_scr._draw()
-                time.sleep(0.05)
-                frame += 1
+            # Keep refreshing the execution screen while organizer runs.
+            # We approximate progress by polling done count.
+            last_done = 0
+            while not done_evt.wait(timeout=0.05):
+                # Estimate progress from result_box intermediate state isn't
+                # available, so we animate the spinner via repeated redraws.
+                xs._draw()
 
             t.join()
-            if err_holder:
-                raise err_holder[0]
-            result = result_holder[0]
+            if err_box: raise err_box[0]
+            result = result_box[0]
 
-            # Final draw with complete count
-            exec_scr.done = len(result.records)
-            exec_scr._draw()
-            time.sleep(0.4)  # let user see 100%
+            # Update done count and do one final draw showing 100%
+            xs.done = len(result.records)
+            for r in result.records:
+                dest = Path(r.destination).parent.name
+                xs.log.append((r.category, r.filename, dest))
+            xs._draw()
+            time.sleep(0.5)   # let user see 100%
     else:
-        # Plain progress bar
+        # Plain execution with progress bar
         result = organize_folder(
             base=target, dry_run=False,
-            recursive=args.recursive,
-            max_depth=args.max_depth,
+            recursive=args.recursive, max_depth=args.max_depth,
             follow_symlinks=args.follow_symlinks,
             extra_ignore=args.ignore or [],
             category_template=template,
-            smart=args.smart,
         )
-        if not quiet:
-            out.progress_line(len(result.records), n_moves,
-                              elapsed=time.monotonic() - t_exec)
-            print()
+        if not _QUIET:
+            bar = pbar(1.0, 30)
+            print(f"  Moving files…  {bar}  100%  {BGRN+BOLD}{len(result.records)}{RESET} files")
 
     elapsed = time.monotonic() - t_exec
 
-    # ── Save history ─────────────────────────────────────────────────────────
+    # Save history
     log_path = save_history(result.records, target, dry_run=False)
-    if log_path and args.verbose:
-        out.dim(f"History saved: {log_path}")
+    if log_path and args.verbose: _dim(f"History saved: {log_path}")
 
-    # ── Verbose action log ───────────────────────────────────────────────────
     if args.verbose:
         for r in result.records:
             dest = Path(r.destination).parent.name
-            out.print_move(r.filename, dest, r.category)
+            col  = cat_fg(r.category)
+            icon = cat_icon(r.category)
+            print(f"  {col}{icon}{RESET}  {col+BOLD}{r.filename:<40}{RESET}  {MUTED}→{RESET}  {col}{dest}/{RESET}")
 
-    # ── Summary ──────────────────────────────────────────────────────────────
-    if not quiet:
-        out.summary_table(
-            {k: v for k, v in result.categories.items() if v > 0},
-            len(result.records), result.other_files, result.ignored_files,
-            elapsed, dry_run=False,
-        )
+    _summary({k:v for k,v in result.categories.items() if v},
+             len(result.records), result.other_files,
+             result.ignored_files, elapsed, dry_run=False)
 
-        # ── Offer empty dir cleanup ───────────────────────────────────────────
-        scan = scan_empty_dirs(target)
-        if scan.found:
-            out.warn(
-                f"Found {len(scan.found)} empty "
-                f"{'directory' if len(scan.found)==1 else 'directories'}."
-            )
-            if use_tui:
-                from foldr.screen  import Screen
-                from foldr.widgets import confirm_dialog
-                scr = Screen()
-                scr.enter_alt()
-                try:
-                    do_clean = confirm_dialog(
-                        scr,
-                        title=" 🗑  Empty Directories ",
-                        body=[
-                            f"{BWHITE}Remove {BYELLOW}{BOLD}{len(scan.found)}{RESET}{BWHITE} empty directories?{RESET}",
-                        ],
-                        yes=" 🗑 Remove ",
-                        no=" ✗ Skip ",
-                        danger=False,
-                    )
-                finally:
-                    scr.exit_alt()
-            else:
-                do_clean = out.confirm_prompt(
-                    "Remove empty directories?", default=False
-                )
-            if do_clean:
-                removed = remove_empty_dirs(scan.found)
-                out.success(f"Removed {len(removed.removed)} empty directories.")
+    # Empty dir cleanup offer
+    scan = scan_empty_dirs(target)
+    if scan.found:
+        _warn(f"Found {len(scan.found)} empty {'directory' if len(scan.found)==1 else 'directories'}.")
+        if _TUI_ALLOWED:
+            from foldr.tui import confirm_dialog, Screen as _Scr
+            scr = _Scr(); scr.enter()
+            try:
+                do_clean = confirm_dialog(scr, " 🗑 Empty Directories ",
+                    [f"{BWHT}Remove {BYLW+BOLD}{len(scan.found)}{RESET+BWHT} empty directories?{RESET}"],
+                    yes_label=" 🗑 Remove ", no_label=" ✗ Skip ")
+            finally:
+                scr.exit()
+        else:
+            do_clean = _confirm_plain("Remove empty directories?", default=False)
+        if do_clean:
+            removed = remove_empty_dirs(scan.found)
+            _ok(f"Removed {len(removed.removed)} empty directories.")
 
-
-def _print_plain_preview(preview, dry: bool) -> None:
-    """Fallback plain-text preview table."""
-    from tabulate import tabulate
-    from foldr.ansi import cat_icon
-    rows = []
-    for r in preview.records[:80]:
-        dest = Path(r.destination).parent.name
-        rows.append([r.filename, f"→ {dest}/", r.category])
-    print()
-    print(tabulate(rows, headers=["File", "Destination", "Category"],
-                   tablefmt="rounded_outline", maxcolwidths=[40, 25, 18]))
-    total = len(preview.records)
-    if total > 80:
-        out.dim(f"… and {total - 80} more files")
-    print()
-    if dry:
-        out.warn(
-            f"DRY RUN — {BYELLOW}{BOLD}{total}{RESET} files would be moved. "
-            f"No changes made."
-        )
-    else:
-        out.info(f"{total} files will be moved.")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ── main entry point ───────────────────────────────────────────────────────────
 def main() -> None:
-    raw = sys.argv[1:]
+    global _QUIET, _NO_INTER, _TUI_ALLOWED
 
-    # ── Subcommand dispatch (before argparse) ─────────────────────────────────
-    # Find first non-flag positional
-    subcmds = {"watch", "undo", "history"}
-    first_pos = next(
-        (a for a in raw if not a.startswith("-")), None
-    )
+    raw  = sys.argv[1:]
+
+    # Detect subcommand BEFORE argparse (so it's never eaten as 'path')
+    _SUBCMDS = {"watch", "undo", "history"}
+    first_pos = next((a for a in raw if not a.startswith("-")), None)
 
     parser = _build_parser()
     args, _ = parser.parse_known_args(raw)
 
-    # ── Banner ────────────────────────────────────────────────────────────────
-    if not args.quiet:
-        if _is_tty() and not args.no_interactive:
+    _QUIET       = args.quiet
+    _NO_INTER    = args.no_interactive
+    _TUI_ALLOWED = is_tty() and not _NO_INTER and not _QUIET
+
+    # Splash + banner
+    if not _QUIET:
+        if _TUI_ALLOWED:
             try:
                 from foldr.tui import splash
-                splash(duration=0.7)
+                splash(duration=0.65)
             except Exception:
                 pass
-        out.banner()
+        _banner()
 
-    # ── Route subcommands ────────────────────────────────────────────────────
-    if first_pos == "watch":
-        cmd_watch(raw, args)
-        return
+    # Subcommand routing
+    if first_pos == "watch":   cmd_watch(raw, args); return
+    if first_pos == "undo":    cmd_undo(args);        return
+    if first_pos == "history": cmd_history(args);     return
 
-    if first_pos == "undo":
-        cmd_undo(args)
-        return
-
-    if first_pos == "history":
-        cmd_history(args)
-        return
-
-    # ── Resolve target directory ─────────────────────────────────────────────
+    # Resolve target directory
     if args.path is None or first_pos is None:
         cwd = Path.cwd()
-        if not args.quiet:
-            out.panel(
-                f"  {BWHITE}No directory specified.{RESET}\n\n"
-                f"  Target:  {BCYAN}{BOLD}{cwd}{RESET}\n\n"
-                f"  {MUTED}Pass a path to organize a specific directory.{RESET}",
-                title="FOLDR",
-                col=BCYAN,
+        if not _QUIET:
+            _panel(
+                f"  {BWHT}No directory specified.{RESET}\n\n"
+                f"  Target:  {BCYN+BOLD}{cwd}{RESET}\n\n"
+                f"  {MUTED}Pass a path to organize a different directory.{RESET}",
+                title="FOLDR", col=BCYN,
             )
-        if _is_tty() and not args.no_interactive:
-            from foldr.screen  import Screen
-            from foldr.widgets import confirm_dialog
-            scr = Screen()
-            scr.enter_alt()
+        if _TUI_ALLOWED:
+            from foldr.tui import confirm_dialog, Screen as _Scr
+            scr = _Scr(); scr.enter()
             try:
-                confirmed = confirm_dialog(
-                    scr,
-                    title=" 📁 Organize Current Directory ",
-                    body=[
-                        f"{BWHITE}Organize: {BCYAN}{BOLD}{cwd.name}/{RESET}",
-                        f"{BWHITE}Full path: {MUTED}{cwd}{RESET}",
-                    ],
-                    yes=" ✓ Organize ",
-                    no=" ✗ Cancel ",
-                )
+                confirmed = confirm_dialog(scr, " 📁 Organize Current Directory ",
+                    [f"{BWHT}Organize: {BCYN+BOLD}{cwd.name}/{RESET}",
+                     f"{MUTED}{cwd}{RESET}"],
+                    yes_label=" ✓ Organize ", no_label=" ✗ Cancel ")
             finally:
-                scr.exit_alt()
+                scr.exit()
         else:
-            confirmed = out.confirm_prompt(
-                f"Organize {cwd.name} (current directory)?",
-                default=False,
-            )
+            confirmed = _confirm_plain(f"Organize {cwd.name} (current directory)?", default=False)
         if not confirmed:
-            out.dim("Cancelled.")
-            return
+            _dim("Cancelled."); return
         target = cwd
     else:
         target = Path(args.path).resolve()
 
     if not target.exists() or not target.is_dir():
-        out.error(f"'{target}' is not a valid directory.")
-        sys.exit(1)
+        _err(f"'{target}' is not a valid directory."); sys.exit(1)
 
     template = _load_template(args.config, args.quiet)
 
     if args.deduplicate:
-        cmd_deduplicate(
-            target=target,
-            strategy_str=args.deduplicate,
-            recursive=args.recursive,
-            max_depth=args.max_depth,
-            dry_run=args.dry_run,
-            quiet=args.quiet,
-            no_interactive=args.no_interactive,
-        )
+        cmd_dedup(target, args.deduplicate, args.recursive,
+                  args.max_depth, args.dry_run, args.verbose)
         return
 
     cmd_organize(target, args, template)
