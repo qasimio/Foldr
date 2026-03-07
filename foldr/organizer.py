@@ -1,66 +1,19 @@
 """
 foldr.organizer
 ~~~~~~~~~~~~~~~
-Core file-organisation engine for FOLDR v3.
-
-Design rules
-------------
-- Recursive mode always targets the *root* category folders.
-  Sub-directories never get their own category tree — files are lifted
-  to the root's Documents/, Code/, etc.  This prevents the
-  lol/Code/Code/… nesting bug.
-- Every file move is recorded in an OperationRecord for undo support.
-- Ignore rules (from .foldrignore or --ignore patterns) are evaluated
-  before any file is touched.
+Core file-organisation engine for FOLDR v4.
 """
 from __future__ import annotations
 
 import fnmatch
 import shutil
 import uuid
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 from foldr.config import CATEGORIES_TEMPLATE
+from foldr.models import OperationRecord, OrganizeResult
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Data structures
-# ──────────────────────────────────────────────────────────────────────────────
-
-@dataclass
-class OperationRecord:
-    """Single file-move record, used for undo."""
-    op_id: str
-    source: str          # absolute original path
-    destination: str     # absolute new path
-    filename: str
-    category: str
-    timestamp: str
-
-
-@dataclass
-class OrganizeResult:
-    """Everything a caller / the CLI needs after a run."""
-    total_items: int = 0
-    skipped_directories: int = 0
-    other_files: int = 0
-    categories: dict[str, int] = field(default_factory=dict)
-    actions: list[str] = field(default_factory=list)
-    records: list[OperationRecord] = field(default_factory=list)
-    dry_run: bool = False
-    recursive: bool = False
-    dirs_processed: int = 1
-    max_depth: int | None = None
-    follow_symlinks: bool = False
-    ignored_files: int = 0
-    ignored_dirs: int = 0
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Category helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 def _build_categories(base: Path, template: dict) -> dict:
     return {
@@ -77,12 +30,7 @@ def _dest_folders(categories: dict) -> set[Path]:
     return {cat["folder"] for cat in categories.values()}
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Ignore helpers
-# ──────────────────────────────────────────────────────────────────────────────
-
 def _load_foldrignore(base: Path) -> list[str]:
-    """Parse .foldrignore from the root directory."""
     ignore_file = base / ".foldrignore"
     if not ignore_file.exists():
         return []
@@ -95,9 +43,7 @@ def _load_foldrignore(base: Path) -> list[str]:
 
 
 def _matches_any(name: str, rel_path: str, patterns: list[str]) -> bool:
-    """Return True if the file/dir matches any ignore pattern."""
     for pattern in patterns:
-        # directory pattern (trailing slash)
         if pattern.endswith("/"):
             if fnmatch.fnmatch(name, pattern.rstrip("/")) or fnmatch.fnmatch(rel_path, pattern.rstrip("/")):
                 return True
@@ -107,10 +53,6 @@ def _matches_any(name: str, rel_path: str, patterns: list[str]) -> bool:
     return False
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# File-move helper
-# ──────────────────────────────────────────────────────────────────────────────
-
 def _move_file(
     destination: Path,
     source: Path,
@@ -119,7 +61,6 @@ def _move_file(
     result: OrganizeResult,
     rel_prefix: str = "",
 ) -> None:
-    """Move source → destination, resolving name conflicts. Records the op."""
     target = destination / source.name
 
     if target.exists():
@@ -130,12 +71,12 @@ def _move_file(
                 target = candidate
                 break
             counter += 1
-        display_name = target.name
-    else:
-        display_name = source.name
 
     label = f"[{rel_prefix}] " if rel_prefix else ""
-    result.actions.append(f"{label}{source.name} → {destination.name}/{display_name if display_name != source.name else ''}")
+    display = target.name if target.name != source.name else ""
+    result.actions.append(
+        f"{label}{source.name} → {destination.name}/{display}"
+    )
 
     record = OperationRecord(
         op_id=str(uuid.uuid4()),
@@ -148,14 +89,9 @@ def _move_file(
     result.records.append(record)
 
     if not dry_run:
-        if not destination.exists():
-            destination.mkdir(parents=True, exist_ok=True)
+        destination.mkdir(parents=True, exist_ok=True)
         shutil.move(str(source), str(target))
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Single-directory organiser (always targets root categories)
-# ──────────────────────────────────────────────────────────────────────────────
 
 def _organize_dir(
     directory: Path,
@@ -166,11 +102,6 @@ def _organize_dir(
     root_base: Path,
     result: OrganizeResult,
 ) -> None:
-    """
-    Organise files directly inside `directory`.
-    All moves go to `root_categories` folders (rooted at root_base).
-    Never creates category sub-trees inside subdirectories.
-    """
     try:
         entries = list(directory.iterdir())
     except PermissionError:
@@ -179,24 +110,20 @@ def _organize_dir(
     result.total_items += len(entries)
 
     for entry in entries:
-        # compute relative path for ignore matching
         try:
             rel = str(entry.relative_to(root_base))
         except ValueError:
             rel = entry.name
 
         if entry.is_dir():
-            # Skip FOLDR's own output folders
             if entry in root_dest_folders:
                 continue
-            # Check ignore patterns for directories
             if _matches_any(entry.name, rel, ignore_patterns):
                 result.ignored_dirs += 1
                 continue
             result.skipped_directories += 1
             continue
 
-        # Ignore check for files
         if _matches_any(entry.name, rel, ignore_patterns):
             result.ignored_files += 1
             continue
@@ -207,7 +134,10 @@ def _organize_dir(
         for cat_name, cat in root_categories.items():
             if ext in cat["ext"]:
                 cat["count"] += 1
-                rel_prefix = str(directory.relative_to(root_base)) if directory != root_base else ""
+                rel_prefix = (
+                    str(directory.relative_to(root_base))
+                    if directory != root_base else ""
+                )
                 _move_file(
                     destination=cat["folder"],
                     source=entry,
@@ -222,10 +152,6 @@ def _organize_dir(
         if not moved:
             result.other_files += 1
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Recursive directory collector
-# ──────────────────────────────────────────────────────────────────────────────
 
 def _collect_subdirs(
     base: Path,
@@ -250,12 +176,9 @@ def _collect_subdirs(
     for child in children:
         if not child.is_dir():
             continue
-
-        # Never descend into FOLDR output folders
         if child in root_dest_folders:
             continue
 
-        # Ignore rules
         try:
             rel = str(child.relative_to(root_base))
         except ValueError:
@@ -263,7 +186,6 @@ def _collect_subdirs(
         if _matches_any(child.name, rel, ignore_patterns):
             continue
 
-        # Symlink safety
         if child.is_symlink():
             if not follow_symlinks:
                 continue
@@ -294,10 +216,6 @@ def _collect_subdirs(
     return result
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Public API
-# ──────────────────────────────────────────────────────────────────────────────
-
 def organize_folder(
     base: Path,
     dry_run: bool = False,
@@ -306,35 +224,15 @@ def organize_folder(
     follow_symlinks: bool = False,
     extra_ignore: list[str] | None = None,
     category_template: dict | None = None,
+    smart: bool = False,  # accepted but no-op unless python-magic present
 ) -> OrganizeResult:
-    """
-    Organise files in `base`.
-
-    Parameters
-    ----------
-    base              : root directory to organise
-    dry_run           : preview only, no files moved
-    recursive         : descend into subdirectories
-    max_depth         : max recursion depth (None = unlimited)
-    follow_symlinks   : follow symlinked directories
-    extra_ignore      : additional ignore patterns (from --ignore CLI flag)
-    category_template : custom category dict (from --config / user config);
-                        falls back to CATEGORIES_TEMPLATE
-    """
     if not base.exists() or not base.is_dir():
         raise NotADirectoryError("Path must be an existing directory.")
 
     template = category_template if category_template is not None else CATEGORIES_TEMPLATE
-
-    # Build root-level categories ONCE. All files (including those found
-    # recursively) are moved into these folders at the root level.
     root_categories = _build_categories(base, template)
     root_dest_folders = _dest_folders(root_categories)
 
-    # Create destination dirs upfront (only in real mode)
-    # We defer mkdir to _move_file so empty dirs are never pre-created.
-
-    # Ignore patterns: .foldrignore + CLI --ignore overrides
     ignore_patterns = _load_foldrignore(base)
     if extra_ignore:
         ignore_patterns.extend(extra_ignore)
@@ -347,7 +245,6 @@ def organize_folder(
         categories={name: 0 for name in root_categories},
     )
 
-    # ── Organise root ──
     _organize_dir(
         directory=base,
         root_categories=root_categories,
@@ -359,7 +256,6 @@ def organize_folder(
     )
     result.dirs_processed = 1
 
-    # ── Recursive walk ──
     if recursive:
         subdirs = _collect_subdirs(
             base=base,
@@ -381,10 +277,8 @@ def organize_folder(
             )
             result.dirs_processed += 1
 
-    # Update category counts from root_categories (mutated during moves)
     result.categories = {name: cat["count"] for name, cat in root_categories.items()}
 
-    # Clean up empty destination folders
     if not dry_run:
         for folder in root_dest_folders:
             if folder.exists() and folder.is_dir():

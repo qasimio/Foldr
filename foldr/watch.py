@@ -1,30 +1,17 @@
 """
 foldr.watch
 ~~~~~~~~~~~
-Watch mode for FOLDR v4.
-
-Uses watchdog (OS-native filesystem events) to monitor a directory
-and automatically organize new files as they arrive.
-
-Behaviour
----------
-- Only monitors the root directory (non-recursive by default)
-- Waits 300ms after a creation event before processing (handles
-  partial writes / downloads in progress)
-- Skips in-progress file extensions (.crdownload, .part, .tmp)
-- Skips files already inside FOLDR category folders
-- Prints a timestamped log line per organized file
-- Runs until Ctrl+C
+Watch mode for FOLDR v4 — with optional curses live display.
 """
 from __future__ import annotations
 
+import curses
 import sys
 import time
 from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.rule import Rule
 
 from foldr.organizer import organize_folder
 
@@ -40,10 +27,6 @@ def run_watch(
     extra_ignore: list[str] | None = None,
     smart: bool = False,
 ) -> None:
-    """
-    Start the filesystem watcher for `base`.
-    Blocks until KeyboardInterrupt.
-    """
     try:
         from watchdog.observers import Observer
         from watchdog.events import FileSystemEventHandler
@@ -51,27 +34,76 @@ def run_watch(
         console.print(
             Panel.fit(
                 "[bold red]watchdog is required for watch mode.[/bold red]\n\n"
-                "Install it:\n  [bold]pip install watchdog[/bold]",
+                "Install it with:\n  [bold]pip install watchdog[/bold]",
                 border_style="red",
             )
         )
-        sys.exit(1)  # Required to prevent UnboundLocalError/NameError crash later
+        sys.exit(1)
 
+    # Decide display mode
+    use_tui = sys.stdout.isatty()
+
+    # ── TUI display thread ──────────────────────────────────────────────────
+    if use_tui:
+        from foldr.tui import init_colors, WatchDisplay
+        import threading
+
+        _display: WatchDisplay | None = None
+        _stdscr = None
+        _lock = threading.Lock()
+
+        def _tui_main(stdscr):
+            nonlocal _display, _stdscr
+            init_colors()
+            _stdscr = stdscr
+            _display = WatchDisplay(stdscr, base, dry_run)
+            _display.draw()
+            try:
+                while True:
+                    time.sleep(0.1)
+            except KeyboardInterrupt:
+                pass
+
+        tui_thread = threading.Thread(
+            target=lambda: curses.wrapper(_tui_main), daemon=True
+        )
+        tui_thread.start()
+        time.sleep(0.2)  # let curses init
+
+        def _on_file(filename: str, dest: str, category: str) -> None:
+            if _display:
+                with _lock:
+                    _display.add_event(filename, dest, category)
+
+    else:
+        # Plain-text fallback
+        mode_label = "[bold yellow]DRY RUN[/bold yellow]" if dry_run else "[bold green]LIVE[/bold green]"
+        console.print(
+            Panel.fit(
+                f"[bold cyan]Watching[/bold cyan]  [white]{base}[/white]\n"
+                f"Mode  {mode_label}\n\n"
+                "[dim]Files dropped here will be organized automatically.\n"
+                "Press [bold]Ctrl+C[/bold] to stop.[/dim]",
+                border_style="cyan",
+            )
+        )
+
+        def _on_file(filename: str, dest: str, category: str) -> None:
+            prefix = "  [dim](dry)[/dim]" if dry_run else " "
+            console.print(
+                f"{prefix}  [green]→[/green] [white]{filename}[/white]"
+                f"  [dim]→[/dim]  [cyan]{dest}[/cyan]"
+            )
+
+    # ── Event handler ────────────────────────────────────────────────────────
     class FoldrHandler(FileSystemEventHandler):
         def on_created(self, event):
             if event.is_directory:
                 return
-            
-            src_path = Path(event.src_path)
-            
-            # Skip in-progress file extensions
+            src_path = Path(event.src_path if isinstance(event.src_path, str) else (event.src_path.decode('utf-8', errors='replace') if isinstance(event.src_path, bytes) else str(event.src_path)))
             if src_path.suffix.lower() in _IN_PROGRESS_EXTS:
                 return
-                
-            # Allow time for partial writes to finalize
             time.sleep(0.3)
-            
-            # Ensure file wasn't moved/deleted right after creation
             if not src_path.exists():
                 return
 
@@ -80,43 +112,25 @@ def run_watch(
                 dry_run=dry_run,
                 recursive=False,
                 extra_ignore=extra_ignore,
-                category_template=template,
+                category_template=template if template else None,
                 smart=smart,
             )
 
-            # Ensure 'actions' attribute exists and parse results to output
-            if hasattr(result, "actions") and result.actions:
-                for action in result.actions:
-                    parts = action.split("→", 1)
-                    fname = parts[0].strip()
-                    dest  = parts[1].strip() if len(parts) == 2 else ""
-                    prefix = "  [dim](dry)[/dim]" if dry_run else " "
-                    console.print(
-                        f"{prefix}  [green]→[/green] [white]{fname}[/white]"
-                        f"  [dim]→[/dim]  [cyan]{dest}[/cyan]"
-                    )
+            if result.records:
+                for r in result.records:
+                    dest = Path(r.destination).parent.name
+                    _on_file(r.filename, dest + "/", r.category)
 
     observer = Observer()
     observer.schedule(FoldrHandler(), str(base), recursive=False)
     observer.start()
 
-    mode_label = "[bold yellow]DRY RUN[/bold yellow]" if dry_run else "[bold green]LIVE[/bold green]"
-    console.print(
-        Panel.fit(
-            f"[bold cyan]Watching[/bold cyan]  [white]{base}[/white]\n"
-            f"Mode  {mode_label}\n\n"
-            "[dim]Files dropped here will be organized automatically.[/dim]\n"
-            "[dim]Press [bold]Ctrl+C[/bold] to stop.[/dim]",
-            border_style="cyan",
-        )
-    )
-    console.print()
-
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        console.print("\n[dim]Stopping watch mode...[/dim]")
+        if not use_tui:
+            console.print("\n[dim]Stopping watch mode…[/dim]")
     finally:
         observer.stop()
         observer.join()

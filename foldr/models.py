@@ -11,24 +11,16 @@ from enum import Enum, auto
 from pathlib import Path
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Operation records (for undo / history)
-# ──────────────────────────────────────────────────────────────────────────────
-
 @dataclass
 class OperationRecord:
     """Single file-move record, used for undo and history display."""
-    op_id: str           # UUID per move
-    source: str          # absolute original path
-    destination: str     # absolute new path
+    op_id: str
+    source: str
+    destination: str
     filename: str
     category: str
-    timestamp: str       # ISO-8601 UTC
+    timestamp: str
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Organize result
-# ──────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class OrganizeResult:
@@ -46,16 +38,11 @@ class OrganizeResult:
     follow_symlinks: bool = False
     ignored_files: int = 0
     ignored_dirs: int = 0
-    # v4 additions
-    verbose_log: list[str] = field(default_factory=list)   # detailed messages
+    verbose_log: list[str] = field(default_factory=list)
     empty_dirs_found: list[Path] = field(default_factory=list)
     duplicates: list["DuplicateGroup"] = field(default_factory=list)
-    mime_overrides: int = 0   # files re-categorized via MIME
+    mime_overrides: int = 0
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Duplicate detection
-# ──────────────────────────────────────────────────────────────────────────────
 
 class DedupeStrategy(Enum):
     KEEP_NEWEST  = auto()
@@ -65,16 +52,11 @@ class DedupeStrategy(Enum):
 
 @dataclass
 class DuplicateGroup:
-    """A set of files that are byte-for-byte identical."""
     sha256: str
     files: list[Path]
-    keep: Path | None = None       # which file to keep (set during dedupe)
+    keep: Path | None = None
     remove: list[Path] = field(default_factory=list)
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Empty-folder result
-# ──────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class EmptyDirScanResult:
@@ -83,14 +65,10 @@ class EmptyDirScanResult:
     skipped: list[Path] = field(default_factory=list)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Undo result
-# ──────────────────────────────────────────────────────────────────────────────
-
 @dataclass
 class UndoResult:
     restored: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     log_deleted: bool = False
-    log_archived: bool = False   # v4: logs are archived, not deleted
+    log_archived: bool = False
