@@ -33,3 +33,6 @@ classifiers = [
 
 [project.scripts]
 foldr = "foldr.cli:main"
+
+[project.optional-dependencies]
+toml = ["tomli>=2.0"]
