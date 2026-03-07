@@ -31,4 +31,4 @@ classifiers = [
 foldr = "foldr.cli:main"
 [project.optional-dependencies]
 toml  = ["tomli>=2.0"]
-magic = ["python-magic==0.4.27"]
+magic = ["python-magic==0.4"]
