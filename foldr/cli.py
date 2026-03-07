@@ -229,3 +229,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# Recursive is working fine and max-depth too - the problem is it is creating repetitive folders inside sub-directories.
