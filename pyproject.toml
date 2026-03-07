@@ -4,17 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "foldr"
-version = "2.0.0"
+version = "0.2.0"
 description = "Smart, predictable CLI file organizer with world-class TUI"
 readme = "README.md"
-authors = [
-  { name = "Muhammad Qasim", email = "amkassim444@gmail.com" }
-]
+authors = [{ name = "Muhammad Qasim", email = "amkassim444@gmail.com" }]
 requires-python = ">=3.9"
 dependencies = [
-  "pyfiglet>=1.0.0",
-  "rich>=13.0.0",
   "watchdog>=3.0.0",
+  "tabulate>=0.9.0",
+  "colorama>=0.4.6",   # Windows ANSI support
 ]
 classifiers = [
   "License :: OSI Approved :: MIT License",
@@ -25,15 +23,12 @@ classifiers = [
   "Topic :: Utilities",
   "Topic :: System :: Filesystems",
 ]
-
 [project.urls]
-"Homepage"   = "https://github.com/qasimio/Foldr"
+"Homepage"    = "https://github.com/qasimio/Foldr"
 "Source Code" = "https://github.com/qasimio/Foldr"
 "Bug Tracker" = "https://github.com/qasimio/Foldr/issues"
-
 [project.scripts]
 foldr = "foldr.cli:main"
-
 [project.optional-dependencies]
 toml  = ["tomli>=2.0"]
 magic = ["python-magic==0.4.27"]

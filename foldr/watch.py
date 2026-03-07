@@ -1,23 +1,17 @@
 """
 foldr.watch
 ~~~~~~~~~~~
-Watch mode for FOLDR v4 — with optional curses live display.
+Watch mode — uses watchdog + optional WatchScreen TUI.
 """
 from __future__ import annotations
-
-import curses
-import sys
-import time
+import sys, time, threading
 from pathlib import Path
 
-from rich.console import Console
-from rich.panel import Panel
-
 from foldr.organizer import organize_folder
+from foldr import output as out
+from foldr.ansi import BCYAN, BYELLOW, BGREEN, RESET, BOLD, MUTED
 
-console = Console()
-
-_IN_PROGRESS_EXTS = {".crdownload", ".part", ".tmp", ".download", ".partial"}
+_IN_PROGRESS = {".crdownload", ".part", ".tmp", ".download", ".partial"}
 
 
 def run_watch(
@@ -26,111 +20,87 @@ def run_watch(
     dry_run: bool = False,
     extra_ignore: list[str] | None = None,
     smart: bool = False,
+    use_tui: bool = True,
 ) -> None:
     try:
         from watchdog.observers import Observer
-        from watchdog.events import FileSystemEventHandler
+        from watchdog.events    import FileSystemEventHandler
     except ImportError:
-        console.print(
-            Panel.fit(
-                "[bold red]watchdog is required for watch mode.[/bold red]\n\n"
-                "Install it with:\n  [bold]pip install watchdog[/bold]",
-                border_style="red",
-            )
+        out.error(
+            "watchdog is required for watch mode.\n"
+            "  Install: pip install watchdog"
         )
         sys.exit(1)
 
-    # Decide display mode
-    use_tui = sys.stdout.isatty()
-
-    # ── TUI display thread ──────────────────────────────────────────────────
+    # ── Set up display ────────────────────────────────────────────────────────
+    watch_scr = None
     if use_tui:
-        from foldr.tui import init_colors, WatchDisplay
-        import threading
+        from foldr.tui import WatchScreen
+        watch_scr = WatchScreen(base, dry_run)
 
-        _display: WatchDisplay | None = None
-        _stdscr = None
-        _lock = threading.Lock()
-
-        def _tui_main(stdscr):
-            nonlocal _display, _stdscr
-            init_colors()
-            _stdscr = stdscr
-            _display = WatchDisplay(stdscr, base, dry_run)
-            _display.draw()
-            try:
-                while True:
-                    time.sleep(0.1)
-            except KeyboardInterrupt:
-                pass
-
-        tui_thread = threading.Thread(
-            target=lambda: curses.wrapper(_tui_main), daemon=True
-        )
-        tui_thread.start()
-        time.sleep(0.2)  # let curses init
-
-        def _on_file(filename: str, dest: str, category: str) -> None:
-            if _display:
-                with _lock:
-                    _display.add_event(filename, dest, category)
-
-    else:
-        # Plain-text fallback
-        mode_label = "[bold yellow]DRY RUN[/bold yellow]" if dry_run else "[bold green]LIVE[/bold green]"
-        console.print(
-            Panel.fit(
-                f"[bold cyan]Watching[/bold cyan]  [white]{base}[/white]\n"
-                f"Mode  {mode_label}\n\n"
-                "[dim]Files dropped here will be organized automatically.\n"
-                "Press [bold]Ctrl+C[/bold] to stop.[/dim]",
-                border_style="cyan",
-            )
-        )
-
-        def _on_file(filename: str, dest: str, category: str) -> None:
-            prefix = "  [dim](dry)[/dim]" if dry_run else " "
-            console.print(
-                f"{prefix}  [green]→[/green] [white]{filename}[/white]"
-                f"  [dim]→[/dim]  [cyan]{dest}[/cyan]"
+    def _on_event(filename: str, dest: str, category: str) -> None:
+        if watch_scr:
+            watch_scr.add_event(filename, dest, category)
+        elif not getattr(out, 'args_quiet', False):
+            tag = f"  {BYELLOW}{BOLD}[DRY]{RESET}" if dry_run else "     "
+            from foldr.ansi import cat_col, cat_icon
+            col  = cat_col(category)
+            icon = cat_icon(category)
+            print(
+                f"{tag}  {col}{icon}{RESET}  "
+                f"{col}{BOLD}{filename:<40}{RESET}  "
+                f"{MUTED}→{RESET}  {col}{dest}/{RESET}"
             )
 
-    # ── Event handler ────────────────────────────────────────────────────────
+    # ── Watchdog handler ──────────────────────────────────────────────────────
     class FoldrHandler(FileSystemEventHandler):
         def on_created(self, event):
             if event.is_directory:
                 return
-            src_path = Path(event.src_path if isinstance(event.src_path, str) else (event.src_path.decode('utf-8', errors='replace') if isinstance(event.src_path, bytes) else str(event.src_path)))
-            if src_path.suffix.lower() in _IN_PROGRESS_EXTS:
+            src_path = event.src_path if isinstance(event.src_path, str) else bytes(event.src_path).decode('utf-8')
+            p = Path(src_path)
+            if p.suffix.lower() in _IN_PROGRESS:
                 return
             time.sleep(0.3)
-            if not src_path.exists():
+            if not p.exists():
                 return
 
             result = organize_folder(
                 base=base,
                 dry_run=dry_run,
                 recursive=False,
-                extra_ignore=extra_ignore,
-                category_template=template if template else None,
+                extra_ignore=extra_ignore or [],
+                category_template=template or None,
                 smart=smart,
             )
-
-            if result.records:
-                for r in result.records:
-                    dest = Path(r.destination).parent.name
-                    _on_file(r.filename, dest + "/", r.category)
+            for r in result.records:
+                dest = Path(r.destination).parent.name
+                _on_event(r.filename, dest, r.category)
 
     observer = Observer()
     observer.schedule(FoldrHandler(), str(base), recursive=False)
     observer.start()
 
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        if not use_tui:
-            console.print("\n[dim]Stopping watch mode…[/dim]")
-    finally:
-        observer.stop()
-        observer.join()
+    if use_tui and watch_scr:
+        # Run TUI in main thread, watchdog in background
+        try:
+            watch_scr.run_blocking()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            watch_scr.stop()
+    else:
+        mode = f"{BYELLOW}DRY RUN{RESET}" if dry_run else f"{BGREEN}LIVE{RESET}"
+        print(f"\n  {BCYAN}Watching:{RESET}  {base}  [{mode}]")
+        print(f"  {MUTED}Press Ctrl+C to stop.{RESET}\n")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print(f"\n  {MUTED}Stopping…{RESET}")
+
+    observer.stop()
+    observer.join()
+
+# monkey-patch quiet flag for non-tty output.py usage
+setattr(out, 'args_quiet', False)
