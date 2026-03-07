@@ -1,41 +1,32 @@
 """
-cli.py — FOLDR v2 command-line interface
+foldr.cli
+~~~~~~~~~
+FOLDR v3 — interactive CLI built on Rich + Textual-free patterns.
 
 Commands
 --------
-  foldr <path>                  organize a directory
-  foldr undo                    undo the last run
-  foldr undo --id <id>          undo a specific run
-  foldr history                 list past runs
-  foldr history --clear         delete all history
-
-Organize flags
---------------
-  --dry-run
-  --recursive
-  --max-depth N
-  --follow-symlinks
-  --config <path>               custom foldr.toml
-  --ignore <pattern>            repeatable
-
-Examples
---------
-  foldr ~/Downloads
-  foldr ~/Downloads --dry-run
-  foldr ~/Downloads --recursive
-  foldr ~/Downloads --recursive --max-depth 3
-  foldr ~/Downloads --recursive --ignore "node_modules/" --ignore "*.tmp"
-  foldr ~/Downloads --config ~/my-foldr.toml
-  foldr undo
-  foldr undo --id 2026-03-07_15-20-00
-  foldr history
+  foldr <path>                        organize root only
+  foldr <path> --recursive            organize all subdirectories
+  foldr <path> --recursive --max-depth 2
+  foldr <path> --recursive --follow-symlinks
+  foldr <path> --dry-run              preview only
+  foldr <path> --config foldr.toml    custom categories
+  foldr <path> --ignore "*.log" "*.tmp"
+  foldr undo                          undo last operation
+  foldr undo --id <id>                undo specific operation
+  foldr undo --dry-run                preview undo
+  foldr history                       list recent operations
 """
-
 from __future__ import annotations
 
+import argparse
 import sys
+import time
 from pathlib import Path
 
+from pyfiglet import Figlet
+from rich import box
+from rich.columns import Columns
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
@@ -48,516 +39,533 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
+from rich.prompt import Confirm
 from rich.rule import Rule
+from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
-from rich import box
-from pyfiglet import Figlet
+from rich.tree import Tree
 
-from foldr.organizer import organize_folder
-from foldr.history import (
+from .organizer import OrganizeResult, organize_folder
+from .config_loader import load_template
+from .history import (
     UndoResult,
-    delete_run,
-    latest_run,
-    list_runs,
-    load_run,
-    save_run,
-    undo_run,
+    get_history_entry,
+    get_latest_history,
+    list_history,
+    save_history,
+    undo_operation,
 )
-from foldr.config_loader import resolve_custom_config
 
-
-# ─── Shared console ───────────────────────────────────────────────────────────
 
 console = Console()
 
 
-# ─── Banner ───────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Banner
+# ──────────────────────────────────────────────────────────────────────────────
 
 def _banner() -> None:
     figlet = Figlet(font="slant")
     console.print(figlet.renderText("FOLDR"), style="bold cyan", end="")
     console.print(
         Panel.fit(
-            "[bold]File Organizer CLI[/bold]  [dim cyan]v2[/dim cyan]\n"
-            "Organize files by extension — safe, fast, predictable\n\n"
-            "[dim]Built by Muhammad Qasim (@qasimio)[/dim]\n"
-            "[dim]Run [bold]foldr --help[/bold] for full usage[/dim]",
+            "[bold white]File Organizer CLI[/bold white] [dim cyan]v3[/dim cyan]\n"
+            "[dim]Organize files by extension · Recursive · Undo · Config[/dim]\n\n"
+            "[dim]Built by Muhammad Qasim ([cyan]@qasimio[/cyan])[/dim]\n"
+            "[dim]Run [bold]foldr --help[/bold] for usage · paths with spaces must be quoted[/dim]",
             border_style="cyan",
             padding=(0, 2),
         )
     )
 
 
-# ─── Argument parser ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Argument parser
+# ──────────────────────────────────────────────────────────────────────────────
 
-def _make_parser():
-    import argparse
-
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="foldr",
-        description="FOLDR — organize files by extension",
+        description="Organize files in a directory by extension.",
+        epilog=(
+            "EXAMPLES:\n"
+            "  foldr ~/Downloads\n"
+            "  foldr ~/Downloads --dry-run\n"
+            "  foldr ~/Downloads --recursive --max-depth 2\n"
+            "  foldr ~/Downloads --ignore '*.log' 'node_modules/'\n"
+            "  foldr ~/Downloads --config ~/foldr.toml\n"
+            "  foldr undo\n"
+            "  foldr undo --id a1b2c3\n"
+            "  foldr history\n"
+        ),
         formatter_class=argparse.RawTextHelpFormatter,
-        add_help=True,
     )
 
-    sub = parser.add_subparsers(dest="command")
-
-    # ── undo ─────────────────────────────────────────────────────────────────
-    undo_p = sub.add_parser("undo", help="Undo a previous run")
-    undo_p.add_argument(
-        "--id",
-        metavar="RUN_ID",
-        default=None,
-        help="Run ID to undo (default: latest run)",
-    )
-    undo_p.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Preview undo without moving files",
-    )
-
-    # ── history ───────────────────────────────────────────────────────────────
-    hist_p = sub.add_parser("history", help="View or clear run history")
-    hist_p.add_argument(
-        "--clear",
-        action="store_true",
-        help="Delete all history entries",
-    )
-
-    # ── organize (default, no subcommand) ─────────────────────────────────────
     parser.add_argument(
         "path",
-        type=Path,
         nargs="?",
-        default=None,
-        help="Directory to organize",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Preview actions without moving any files",
-    )
-
-    rec = parser.add_argument_group(
-        "Recursive Engine",
-        "Organize nested directory structures",
-    )
-    rec.add_argument(
-        "--recursive",
-        action="store_true",
-        help="Descend into subdirectories",
-    )
-    rec.add_argument(
-        "--max-depth",
-        type=int,
-        metavar="N",
-        default=None,
-        help="Maximum recursion depth (requires --recursive)",
-    )
-    rec.add_argument(
-        "--follow-symlinks",
-        action="store_true",
-        help="Follow symlinked directories (disabled by default, loops detected)",
-    )
-
-    cfg = parser.add_argument_group(
-        "Configuration",
-        "Custom rules and ignore patterns",
-    )
-    cfg.add_argument(
-        "--config",
-        type=Path,
-        metavar="PATH",
-        default=None,
-        help="Path to a foldr.toml custom config file",
-    )
-    cfg.add_argument(
-        "--ignore",
-        action="append",
-        metavar="PATTERN",
-        dest="ignore_patterns",
-        default=[],
+        type=str,
         help=(
-            "Ignore pattern (repeatable). Examples:\n"
-            "  --ignore 'node_modules/'  --ignore '*.tmp'  --ignore '.env'"
+            "Directory to organize, OR a sub-command:\n"
+            "  undo     — restore files from last (or --id) operation\n"
+            "  history  — list recent operations"
         ),
     )
+    parser.add_argument("--dry-run", action="store_true", help="Preview without moving files")
+
+    rg = parser.add_argument_group("Recursive Engine")
+    rg.add_argument("--recursive", action="store_true", help="Descend into subdirectories")
+    rg.add_argument("--max-depth", type=int, metavar="N", default=None,
+                    help="Max recursion depth (requires --recursive)")
+    rg.add_argument("--follow-symlinks", action="store_true",
+                    help="Follow symlinked directories (default: off)")
+
+    ig = parser.add_argument_group("Ignore Rules")
+    ig.add_argument("--ignore", nargs="+", metavar="PATTERN", default=None,
+                    help="Patterns to ignore, e.g. '*.log' 'node_modules/'")
+
+    cg = parser.add_argument_group("Configuration")
+    cg.add_argument("--config", type=Path, metavar="FILE",
+                    help="Path to a foldr.toml config file")
+
+    ug = parser.add_argument_group("Undo")
+    ug.add_argument("--id", type=str, metavar="ID",
+                    help="Specific operation ID to undo (use with: foldr undo)")
 
     return parser
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Shared UI helpers
+# ──────────────────────────────────────────────────────────────────────────────
 
 def _warn(msg: str) -> None:
     console.print(Panel.fit(msg, border_style="yellow"))
 
 
-def _error(msg: str, code: int = 1) -> None:
+def _error(msg: str) -> None:
     console.print(Panel.fit(msg, border_style="red"))
-    sys.exit(code)
+
+
+def _success(msg: str) -> None:
+    console.print(Panel.fit(msg, border_style="green"))
 
 
 def _rule(title: str = "") -> None:
     console.print(Rule(title, style="dim cyan"))
 
 
-def _print_actions(actions: list[str], limit: int = 200) -> None:
-    if not actions:
-        console.print("[dim]  No files to move.[/dim]")
+# ──────────────────────────────────────────────────────────────────────────────
+# Organize command rendering
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _render_actions(result: OrganizeResult, base: Path) -> None:
+    _rule("Actions")
+
+    if not result.actions:
+        console.print("  [dim]No files to organize.[/dim]\n")
         return
 
-    shown = actions[:limit]
-    for action in shown:
-        console.print(f"  [green]→[/green] {action}")
+    # Group actions by source directory prefix
+    root_actions = []
+    sub_actions: dict[str, list[str]] = {}
 
-    if len(actions) > limit:
-        remaining = len(actions) - limit
-        console.print(
-            f"\n  [dim]… and {remaining} more action(s). "
-            "Run with [bold]--dry-run[/bold] to see all.[/dim]"
-        )
+    for action in result.actions:
+        if action.startswith("["):
+            bracket_end = action.index("]")
+            prefix = action[1:bracket_end]
+            rest = action[bracket_end + 2:]
+            sub_actions.setdefault(prefix, []).append(rest)
+        else:
+            root_actions.append(action)
 
+    # Root-level
+    if root_actions:
+        console.print(f"  [dim bold]{base.name}/[/dim bold]")
+        for a in root_actions:
+            parts = a.split("→")
+            if len(parts) == 2:
+                src = parts[0].strip()
+                dst = parts[1].strip()
+                console.print(f"    [green]→[/green] [white]{src}[/white]  [dim]→[/dim]  [cyan]{dst}[/cyan]")
+            else:
+                console.print(f"    [green]→[/green] {a}")
 
-def _print_summary(base: Path, result: dict) -> None:
+    # Sub-directory groups
+    for prefix, actions in sub_actions.items():
+        console.print(f"\n  [dim bold]{prefix}/[/dim bold]")
+        for a in actions:
+            parts = a.split("→")
+            if len(parts) == 2:
+                src = parts[0].strip()
+                dst = parts[1].strip()
+                console.print(f"    [green]→[/green] [white]{src}[/white]  [dim]→[/dim]  [cyan]{dst}[/cyan]")
+            else:
+                console.print(f"    [green]→[/green] {a}")
+
     console.print()
+
+
+def _render_summary(result: OrganizeResult, base: Path, log_path: Path | None) -> None:
     _rule("Summary")
-    console.print()
 
-    # mode badge
-    if result["dry_run"]:
-        mode_text = Text("● DRY RUN", style="bold yellow")
-    else:
-        mode_text = Text("● EXECUTED", style="bold green")
-    console.print(mode_text)
+    # Mode + flags row
+    mode_text = (
+        "[bold yellow]● DRY RUN[/bold yellow]"
+        if result.dry_run
+        else "[bold green]● EXECUTED[/bold green]"
+    )
+    console.print(f"  Mode  {mode_text}")
 
-    # recursive line
-    if result.get("recursive"):
-        depth = result["max_depth"] or "unlimited"
-        symlinks = "yes" if result.get("follow_symlinks") else "no"
-        dirs = result.get("dirs_processed", 1)
+    if result.recursive:
+        depth_label = str(result.max_depth) if result.max_depth is not None else "[dim]unlimited[/dim]"
+        sym_label = "[green]yes[/green]" if result.follow_symlinks else "[dim]no[/dim]"
         console.print(
-            f"  [dim]recursive[/dim]  depth=[cyan]{depth}[/cyan]  "
-            f"symlinks=[cyan]{symlinks}[/cyan]  "
-            f"dirs-processed=[cyan]{dirs}[/cyan]"
+            f"  Recursive  [cyan]yes[/cyan]   "
+            f"Max depth  {depth_label}   "
+            f"Symlinks  {sym_label}   "
+            f"Dirs scanned  [cyan]{result.dirs_processed}[/cyan]"
         )
 
-    # ignore patterns in use
-    patterns = result.get("ignore_patterns", [])
-    if patterns:
-        console.print(f"  [dim]ignoring:[/dim] {', '.join(patterns)}")
+    if result.ignored_files or result.ignored_dirs:
+        console.print(
+            f"  Ignored  [yellow]{result.ignored_files} files[/yellow]  "
+            f"[yellow]{result.ignored_dirs} dirs[/yellow]"
+        )
 
     console.print()
 
-    # category table — only non-zero rows
-    non_zero = {k: v for k, v in result["categories"].items() if v > 0}
+    # Category table
+    non_zero = {k: v for k, v in result.categories.items() if v > 0}
     if non_zero:
-        t = Table(
-            box=box.SIMPLE_HEAD,
+        table = Table(
+            box=box.MINIMAL_DOUBLE_HEAD,
             show_header=True,
             header_style="bold cyan",
-            show_footer=False,
+            border_style="dim",
             padding=(0, 2),
         )
-        t.add_column("Category", style="cyan", no_wrap=True)
-        t.add_column("Files moved", justify="right", style="bold")
+        table.add_column("Category", style="cyan", no_wrap=True)
+        table.add_column("Files", justify="right", style="white")
+        table.add_column("Visual", no_wrap=True)
 
-        total_moved = sum(non_zero.values())
+        max_count = max(non_zero.values())
+        bar_width = 20
         for name, count in sorted(non_zero.items(), key=lambda x: -x[1]):
-            bar = "█" * min(count, 30)
-            t.add_row(name, f"{bar}  {count}")
+            filled = int((count / max_count) * bar_width)
+            bar = "[cyan]" + "█" * filled + "[/cyan]" + "[dim]" + "░" * (bar_width - filled) + "[/dim]"
+            table.add_row(name, str(count), bar)
 
-        console.print(t)
-        console.print(f"  [bold]Total moved:[/bold]       {total_moved}")
-    else:
-        console.print("  [dim]No matching files found.[/dim]")
+        console.print(table)
+        console.print()
 
-    console.print(f"  [bold]Total items scanned:[/bold]  {result['total_items']}")
-    console.print(f"  [bold]Skipped directories:[/bold]  {result['skipped_directories']}")
-    console.print(f"  [bold]Other (unmatched):[/bold]    {result['other_files']}")
+    # Stats row
+    total_moved = sum(non_zero.values())
+    console.print(
+        f"  [bold]Total scanned[/bold]  [white]{result.total_items}[/white]   "
+        f"[bold]Moved[/bold]  [green]{total_moved}[/green]   "
+        f"[bold]Skipped dirs[/bold]  {result.skipped_directories}   "
+        f"[bold]Unmatched[/bold]  {result.other_files}"
+    )
+
+    if log_path:
+        console.print(f"\n  [dim]History saved → {log_path}[/dim]")
+        console.print(f"  [dim]Undo with: [bold]foldr undo[/bold][/dim]")
+
     console.print()
 
 
-# ─── Organize command ─────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Progress spinner for actual runs
+# ──────────────────────────────────────────────────────────────────────────────
 
-def _cmd_organize(args) -> None:
-    # ── validate path ────────────────────────────────────────────────────────
-    if args.path is None:
-        _error(
-            "[bold red]No directory specified.[/bold red]\n\n"
-            "Usage:  [bold]foldr <directory>[/bold]\n"
-            "        [bold]foldr --help[/bold]"
+def _run_with_progress(
+    base: Path,
+    dry_run: bool,
+    recursive: bool,
+    max_depth: int | None,
+    follow_symlinks: bool,
+    extra_ignore: list[str] | None,
+    template: dict,
+) -> OrganizeResult:
+    """Run organize_folder with a live spinner for non-dry real runs."""
+    if dry_run:
+        # Dry runs are instant; no spinner needed
+        return organize_folder(
+            base=base, dry_run=True, recursive=recursive,
+            max_depth=max_depth, follow_symlinks=follow_symlinks,
+            extra_ignore=extra_ignore, category_template=template,
         )
 
-    base = args.path.expanduser().resolve()
+    progress = Progress(
+        SpinnerColumn(spinner_name="dots", style="cyan"),
+        TextColumn("[bold cyan]{task.description}"),
+        BarColumn(bar_width=30, style="cyan", complete_style="green"),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    )
+    task = progress.add_task("Organizing files…", total=None)
+
+    with progress:
+        result = organize_folder(
+            base=base, dry_run=False, recursive=recursive,
+            max_depth=max_depth, follow_symlinks=follow_symlinks,
+            extra_ignore=extra_ignore, category_template=template,
+        )
+        progress.update(task, completed=1, total=1)
+
+    return result
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Organize command
+# ──────────────────────────────────────────────────────────────────────────────
+
+def cmd_organize(args: argparse.Namespace) -> None:
+    # Validation: unquoted path with spaces
+    # (parser.parse_known_args handled in main)
+
+    # Validate flags
+    if args.max_depth is not None and not args.recursive:
+        _warn("[bold yellow]--max-depth has no effect without --recursive.[/bold yellow]\nAdd [bold]--recursive[/bold] to enable nested traversal.")
+
+    if args.follow_symlinks and not args.recursive:
+        _warn("[bold yellow]--follow-symlinks has no effect without --recursive.[/bold yellow]")
+
+    if args.max_depth is not None and args.recursive and args.max_depth < 1:
+        _error("[bold red]--max-depth must be ≥ 1[/bold red]")
+        raise SystemExit(1)
+
+    base = Path(args.path).expanduser().resolve()
 
     if not base.exists() or not base.is_dir():
         _error(
             "[bold red]Invalid directory path.[/bold red]\n\n"
-            f"Path: [dim]{base}[/dim]\n"
-            "Make sure it exists and is a directory.\n"
-            'Paths with spaces must be quoted:  foldr "D:\\My Downloads"'
+            "Make sure the path exists and is a directory.\n"
+            "If it contains spaces, wrap it in quotes.\n\n"
+            f"Received: [dim]{base}[/dim]"
         )
+        raise SystemExit(1)
 
-    # ── flag validation ───────────────────────────────────────────────────────
-    if args.max_depth is not None and not args.recursive:
-        _warn(
-            "[bold yellow]--max-depth has no effect without --recursive.[/bold yellow]\n"
-            "Add [bold]--recursive[/bold] to enable nested traversal."
-        )
+    # Load config / template
+    try:
+        template, config_label = load_template(args.config)
+    except (FileNotFoundError, RuntimeError) as e:
+        _error(f"[bold red]Config error:[/bold red] {e}")
+        raise SystemExit(1)
 
-    if args.follow_symlinks and not args.recursive:
-        _warn(
-            "[bold yellow]--follow-symlinks has no effect without --recursive.[/bold yellow]\n"
-            "Add [bold]--recursive[/bold] to enable nested traversal."
-        )
+    if config_label:
+        console.print(f"  [dim]Using config: {config_label}[/dim]\n")
 
-    if args.max_depth is not None and args.max_depth < 1:
-        _error("[bold red]--max-depth must be ≥ 1.[/bold red]")
-
-    # ── recursive safety nudge ────────────────────────────────────────────────
+    # Safety nudge for recursive + real run
     if args.recursive and not args.dry_run:
         console.print(
             Panel.fit(
                 "[bold yellow]⚠  Recursive mode is active.[/bold yellow]\n\n"
-                "[bold]Files in all subdirectories will be moved.[/bold]\n"
-                "Run with [bold]--dry-run[/bold] first to preview safely.\n\n"
-                "[dim]Press Ctrl-C to cancel.[/dim]",
+                "Files in [bold]all subdirectories[/bold] will be lifted into\n"
+                f"category folders at [cyan]{base.name}/[/cyan].\n\n"
+                "Run with [bold]--dry-run[/bold] first to preview.",
                 border_style="yellow",
             )
         )
 
-    # ── custom config ─────────────────────────────────────────────────────────
-    custom_config = resolve_custom_config(
-        args.config if hasattr(args, "config") else None
-    )
-    if custom_config:
-        console.print(
-            f"  [dim cyan]Custom config loaded:[/dim cyan] "
-            f"{args.config or '~/.config/foldr/config.toml'} "
-            f"({len(custom_config)} categories)"
-        )
-
-    # ── run with progress spinner ─────────────────────────────────────────────
-    console.print()
-    _rule("Actions")
-    console.print()
-
-    progress = Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(bar_width=28),
-        MofNCompleteColumn(),
-        TimeElapsedColumn(),
-        console=console,
-        transient=True,
+    # Run
+    result = _run_with_progress(
+        base=base,
+        dry_run=args.dry_run,
+        recursive=args.recursive,
+        max_depth=args.max_depth,
+        follow_symlinks=args.follow_symlinks,
+        extra_ignore=args.ignore,
+        template=template,
     )
 
-    with progress:
-        task = progress.add_task("[cyan]Scanning…", total=None)
-        result = organize_folder(
-            base,
-            dry_run=args.dry_run,
-            recursive=args.recursive,
-            max_depth=args.max_depth,
-            follow_symlinks=args.follow_symlinks,
-            custom_config=custom_config,
-            ignore_patterns=args.ignore_patterns or [],
-        )
-        progress.update(task, description="[green]Done", completed=1, total=1)
+    # Save history
+    log_path = save_history(result.records, base, dry_run=args.dry_run)
 
-    _print_actions(result["actions"])
-    _print_summary(base, result)
-
-    # ── save history (execute mode only) ──────────────────────────────────────
-    if not args.dry_run and result.get("records"):
-        from foldr.history import _run_id
-        run_id = _run_id()
-        hist_path = save_run(run_id, base, result)
-        total_moved = sum(result["categories"].values())
-        console.print(
-            f"  [dim]Run saved → {hist_path.name}  "
-            f"({total_moved} files moved)  "
-            "Use [bold]foldr undo[/bold] to reverse.[/dim]"
-        )
-
-    console.print()
+    # Render
+    _render_actions(result, base)
+    _render_summary(result, base, log_path)
 
 
-# ─── Undo command ─────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Undo command
+# ──────────────────────────────────────────────────────────────────────────────
 
-def _cmd_undo(args) -> None:
+def cmd_undo(args: argparse.Namespace) -> None:
     _rule("Undo")
-    console.print()
 
-    run = None
+    # Load log
     if args.id:
-        run = load_run(args.id)
-        if run is None:
-            _error(
-                f"[bold red]Run not found:[/bold red] [dim]{args.id}[/dim]\n\n"
-                "Use [bold]foldr history[/bold] to see available runs."
-            )
+        log_data = get_history_entry(args.id)
+        if log_data is None:
+            _error(f"[bold red]No operation found with ID or filename containing:[/bold red] {args.id}")
+            raise SystemExit(1)
     else:
-        run = latest_run()
-        if run is None:
-            _error(
-                "[bold red]No history found.[/bold red]\n\n"
-                "Nothing to undo — no previous runs recorded."
-            )
+        log_data = get_latest_history()
+        if log_data is None:
+            _warn("[bold yellow]No operation history found.[/bold yellow]\nRun [bold]foldr history[/bold] to see past operations.")
+            raise SystemExit(0)
 
-    files_count = len(run.get("moves", []))
-    timestamp = run.get("timestamp", run["id"])
-    base = run.get("base", "?")
+    # Show what we're about to undo
+    total = log_data.get("total_files", 0)
+    base = log_data.get("base", "unknown")
+    ts = log_data.get("timestamp", "")[:19].replace("T", " ")
+    op_id = log_data.get("id", "?")
 
-    console.print(f"  [bold]Run:[/bold]       {run['id']}")
-    console.print(f"  [bold]Timestamp:[/bold] {timestamp}")
-    console.print(f"  [bold]Directory:[/bold] {base}")
-    console.print(f"  [bold]Files:[/bold]     {files_count}")
+    console.print(
+        Panel.fit(
+            f"[bold]Operation ID[/bold]  [cyan]{op_id}[/cyan]\n"
+            f"[bold]Directory   [/bold]  [dim]{base}[/dim]\n"
+            f"[bold]Timestamp   [/bold]  [dim]{ts} UTC[/dim]\n"
+            f"[bold]Files       [/bold]  [white]{total}[/white]",
+            border_style="cyan",
+            title="[bold]Operation to undo[/bold]",
+        )
+    )
     console.print()
 
-    if files_count == 0:
-        console.print("  [dim]Nothing to undo for this run.[/dim]")
-        return
+    if args.dry_run:
+        console.print("[dim italic]  (dry-run — no files will be moved)\n[/dim italic]")
 
-    # confirmation
+    # Show preview of first 10 records
+    records = log_data.get("records", [])
+    for record in list(reversed(records))[:10]:
+        dest = Path(record["destination"])
+        src = Path(record["source"])
+        console.print(
+            f"  [yellow]←[/yellow] [white]{record['filename']}[/white]  "
+            f"[dim]{dest.parent.name}/[/dim] → [cyan]{src.parent.name}/[/cyan]"
+        )
+    if len(records) > 10:
+        console.print(f"  [dim]… and {len(records) - 10} more[/dim]")
+
+    console.print()
+
+    # Confirmation (skip for dry-run)
     if not args.dry_run:
-        label = "DRY RUN" if args.dry_run else "LIVE"
-        try:
-            answer = console.input(
-                f"  [bold yellow]Restore {files_count} file(s) to original locations? (y/n):[/bold yellow] "
-            )
-        except (EOFError, KeyboardInterrupt):
-            console.print("\n  [dim]Cancelled.[/dim]")
-            return
+        if not Confirm.ask(
+            f"  [bold]Restore {total} file(s) to original locations?[/bold]",
+            default=False,
+            console=console,
+        ):
+            console.print("\n  [dim]Undo cancelled.[/dim]\n")
+            raise SystemExit(0)
 
-        if answer.strip().lower() not in ("y", "yes"):
-            console.print("  [dim]Aborted.[/dim]")
-            return
+    # Execute undo
+    undo_result = undo_operation(log_data, dry_run=args.dry_run)
 
-    console.print()
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(bar_width=28),
-        MofNCompleteColumn(),
-        TimeElapsedColumn(),
-        console=console,
-        transient=True,
-    ) as progress:
-        task = progress.add_task("[cyan]Restoring…", total=None)
-        undo_result = undo_run(run, dry_run=args.dry_run)
-        progress.update(task, description="[green]Done", completed=1, total=1)
-
-    # results
-    mode = "[bold yellow]DRY RUN[/bold yellow]" if args.dry_run else "[bold green]EXECUTED[/bold green]"
-    console.print(f"  Mode: {mode}")
-    console.print(f"  [green]Restored:[/green]  {len(undo_result.restored)}")
-    console.print(f"  [yellow]Skipped:[/yellow]   {len(undo_result.skipped)}")
-    console.print(f"  [red]Errors:[/red]    {len(undo_result.errors)}")
-
+    _rule("Results")
+    if undo_result.restored:
+        for msg in undo_result.restored:
+            console.print(f"  [green]✓[/green] {msg}")
     if undo_result.skipped:
-        console.print("\n  [dim]Skipped (file no longer at destination):[/dim]")
-        for dst, reason in undo_result.skipped[:10]:
-            console.print(f"    [dim]• {Path(dst).name} — {reason}[/dim]")
-
+        console.print()
+        for msg in undo_result.skipped:
+            console.print(f"  [yellow]⚠[/yellow] {msg}")
     if undo_result.errors:
-        console.print("\n  [red]Errors:[/red]")
-        for dst, err in undo_result.errors[:10]:
-            console.print(f"    [red]• {Path(dst).name} — {err}[/red]")
+        console.print()
+        for msg in undo_result.errors:
+            console.print(f"  [red]✗[/red] {msg}")
 
+    console.print()
+    status = "[bold green]✓ Undo complete[/bold green]" if not undo_result.errors else "[bold red]✗ Undo completed with errors[/bold red]"
+    if args.dry_run:
+        status = "[bold yellow]● Dry-run preview complete[/bold yellow]"
+    console.print(f"  {status}")
+    console.print(
+        f"  [dim]{len(undo_result.restored)} restored · "
+        f"{len(undo_result.skipped)} skipped · "
+        f"{len(undo_result.errors)} errors[/dim]"
+    )
+    if undo_result.log_deleted:
+        console.print("  [dim]History entry removed.[/dim]")
     console.print()
 
 
-# ─── History command ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# History command
+# ──────────────────────────────────────────────────────────────────────────────
 
-def _cmd_history(args) -> None:
-    _rule("Run History")
-    console.print()
+def cmd_history() -> None:
+    _rule("Operation History")
 
-    if args.clear:
-        runs = list_runs()
-        if not runs:
-            console.print("  [dim]No history to clear.[/dim]")
-            return
-        try:
-            answer = console.input(
-                f"  [bold yellow]Delete {len(runs)} history entries? (y/n):[/bold yellow] "
-            )
-        except (EOFError, KeyboardInterrupt):
-            console.print("\n  [dim]Cancelled.[/dim]")
-            return
-        if answer.strip().lower() not in ("y", "yes"):
-            console.print("  [dim]Aborted.[/dim]")
-            return
-        for run in runs:
-            delete_run(run["id"])
-        console.print(f"  [green]Cleared {len(runs)} entries.[/green]")
+    entries = list_history(limit=20)
+
+    if not entries:
+        _warn(
+            "[bold yellow]No history found.[/bold yellow]\n\n"
+            "History is stored at [dim]~/.foldr/history/[/dim]\n"
+            "after each non-dry-run operation."
+        )
         return
 
-    runs = list_runs()
-    if not runs:
-        console.print("  [dim]No history yet. Run [bold]foldr <directory>[/bold] to get started.[/dim]")
-        return
-
-    t = Table(
-        box=box.SIMPLE_HEAD,
+    table = Table(
+        box=box.MINIMAL_DOUBLE_HEAD,
         show_header=True,
         header_style="bold cyan",
+        border_style="dim",
         padding=(0, 2),
     )
-    t.add_column("ID / Timestamp", style="cyan", no_wrap=True)
-    t.add_column("Directory", style="dim", overflow="fold")
-    t.add_column("Files", justify="right", style="bold")
-    t.add_column("Mode", justify="center")
-    t.add_column("Recursive", justify="center")
+    table.add_column("ID", style="cyan", no_wrap=True)
+    table.add_column("Timestamp (UTC)", style="dim")
+    table.add_column("Files", justify="right")
+    table.add_column("Directory", style="dim", overflow="fold")
 
-    for run in runs:
-        mode = "[yellow]DRY[/yellow]" if run.get("dry_run") else "[green]EXEC[/green]"
-        rec = "[cyan]yes[/cyan]" if run.get("recursive") else "no"
-        t.add_row(
-            run["id"],
-            run.get("base", "?"),
-            str(run.get("files_moved", "?")),
-            mode,
-            rec,
+    for e in entries:
+        ts = e["timestamp"][:19].replace("T", " ") if e["timestamp"] else "—"
+        table.add_row(
+            e["id"],
+            ts,
+            str(e["total_files"]),
+            e["base"],
         )
 
-    console.print(t)
-    console.print(
-        f"  [dim]{len(runs)} run(s)  ·  "
-        "Use [bold]foldr undo[/bold] to reverse the latest  ·  "
-        "[bold]foldr history --clear[/bold] to delete all[/dim]"
-    )
+    console.print(table)
+    console.print()
+    console.print("  [dim]Undo latest:         [bold]foldr undo[/bold][/dim]")
+    console.print("  [dim]Undo specific:       [bold]foldr undo --id <ID>[/bold][/dim]")
+    console.print("  [dim]Preview undo:        [bold]foldr undo --dry-run[/bold][/dim]")
     console.print()
 
 
-# ─── Entry point ──────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Entry point
+# ──────────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     _banner()
 
-    parser = _make_parser()
+    parser = _build_parser()
     args, extras = parser.parse_known_args()
 
-    # unquoted path with spaces guard
-    if extras and args.command is None:
-        _error(
-            "[bold red]Unexpected arguments detected.[/bold red]\n\n"
-            "Your path may contain spaces but was not quoted.\n\n"
-            "[bold]Correct usage:[/bold]\n"
-            '  foldr "D:\\My Downloads" --dry-run\n\n'
-            "[dim]Shells treat spaces as argument separators.[/dim]",
-            code=2,
-        )
+    # Sub-commands: undo, history
+    if args.path in ("undo", "history", None):
+        if args.path == "history":
+            cmd_history()
+            return
+        if args.path == "undo":
+            cmd_undo(args)
+            return
+        # No path at all
+        parser.print_help()
+        raise SystemExit(0)
 
-    if args.command == "undo":
-        _cmd_undo(args)
-    elif args.command == "history":
-        _cmd_history(args)
-    else:
-        _cmd_organize(args)
+    # Unquoted path-with-spaces guard
+    if extras:
+        _error(
+            "[bold red]Invalid path format detected.[/bold red]\n\n"
+            "It looks like your directory path contains spaces but was not quoted.\n\n"
+            "[bold]Correct usage:[/bold]\n"
+            "  foldr \"D:\\My Downloads\" --dry-run\n\n"
+            "[dim]Shells treat spaces as argument separators unless the path is quoted.[/dim]"
+        )
+        raise SystemExit(2)
+
+    cmd_organize(args)
 
 
 if __name__ == "__main__":
