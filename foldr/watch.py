@@ -1,15 +1,16 @@
 """
 foldr.watch
 ~~~~~~~~~~~
-Watch mode — uses watchdog + optional WatchScreen TUI.
+Watch mode for FOLDR v4 — no Rich dependency.
 """
 from __future__ import annotations
-import sys, time, threading
+import sys, time
 from pathlib import Path
 
+from foldr.term import (
+    RESET, BOLD, MUTED, BCYN, BGRN, BYLW, cat_fg, cat_icon,
+)
 from foldr.organizer import organize_folder
-from foldr import output as out
-from foldr.ansi import BCYAN, BYELLOW, BGREEN, RESET, BOLD, MUTED
 
 _IN_PROGRESS = {".crdownload", ".part", ".tmp", ".download", ".partial"}
 
@@ -20,69 +21,57 @@ def run_watch(
     dry_run: bool = False,
     extra_ignore: list[str] | None = None,
     smart: bool = False,
-    use_tui: bool = True,
+    use_tui: bool = False,
 ) -> None:
     try:
         from watchdog.observers import Observer
         from watchdog.events    import FileSystemEventHandler
     except ImportError:
-        out.error(
-            "watchdog is required for watch mode.\n"
-            "  Install: pip install watchdog"
-        )
+        print(f"  {BYLW}watchdog required for watch mode:{RESET}  pip install watchdog",
+              file=sys.stderr)
         sys.exit(1)
 
-    # ── Set up display ────────────────────────────────────────────────────────
+    # Set up TUI display if available
     watch_scr = None
     if use_tui:
-        from foldr.tui import WatchScreen
-        watch_scr = WatchScreen(base, dry_run)
+        try:
+            from foldr.tui import WatchScreen
+            watch_scr = WatchScreen(base, dry_run)
+        except Exception:
+            watch_scr = None
 
-    def _on_event(filename: str, dest: str, category: str) -> None:
+    def _log_event(filename: str, dest: str, category: str) -> None:
         if watch_scr:
             watch_scr.add_event(filename, dest, category)
-        elif not getattr(out, 'args_quiet', False):
-            tag = f"  {BYELLOW}{BOLD}[DRY]{RESET}" if dry_run else "     "
-            from foldr.ansi import cat_col, cat_icon
-            col  = cat_col(category)
+        else:
+            tag = f"  {BYLW}[DRY]{RESET}" if dry_run else "     "
+            col  = cat_fg(category)
             icon = cat_icon(category)
-            print(
-                f"{tag}  {col}{icon}{RESET}  "
-                f"{col}{BOLD}{filename:<40}{RESET}  "
-                f"{MUTED}→{RESET}  {col}{dest}/{RESET}"
-            )
+            ts   = time.strftime("%H:%M:%S")
+            print(f"{tag}  {MUTED}{ts}{RESET}  {col}{icon} {BOLD}{filename:<40}{RESET}  "
+                  f"{MUTED}→{RESET}  {col}{dest}/{RESET}")
 
-    # ── Watchdog handler ──────────────────────────────────────────────────────
-    class FoldrHandler(FileSystemEventHandler):
+    class _Handler(FileSystemEventHandler):
         def on_created(self, event):
-            if event.is_directory:
-                return
-            src_path = event.src_path if isinstance(event.src_path, str) else bytes(event.src_path).decode('utf-8')
+            if event.is_directory: return
+            src_path = event.src_path if isinstance(event.src_path, str) else str(event.src_path)
             p = Path(src_path)
-            if p.suffix.lower() in _IN_PROGRESS:
-                return
+            if p.suffix.lower() in _IN_PROGRESS: return
             time.sleep(0.3)
-            if not p.exists():
-                return
-
+            if not p.exists(): return
             result = organize_folder(
-                base=base,
-                dry_run=dry_run,
-                recursive=False,
+                base=base, dry_run=dry_run, recursive=False,
                 extra_ignore=extra_ignore or [],
                 category_template=template or None,
-                smart=smart,
             )
             for r in result.records:
-                dest = Path(r.destination).parent.name
-                _on_event(r.filename, dest, r.category)
+                _log_event(r.filename, Path(r.destination).parent.name, r.category)
 
     observer = Observer()
-    observer.schedule(FoldrHandler(), str(base), recursive=False)
+    observer.schedule(_Handler(), str(base), recursive=False)
     observer.start()
 
     if use_tui and watch_scr:
-        # Run TUI in main thread, watchdog in background
         try:
             watch_scr.run_blocking()
         except KeyboardInterrupt:
@@ -90,9 +79,9 @@ def run_watch(
         finally:
             watch_scr.stop()
     else:
-        mode = f"{BYELLOW}DRY RUN{RESET}" if dry_run else f"{BGREEN}LIVE{RESET}"
-        print(f"\n  {BCYAN}Watching:{RESET}  {base}  [{mode}]")
-        print(f"  {MUTED}Press Ctrl+C to stop.{RESET}\n")
+        mode = f"{BYLW}DRY RUN{RESET}" if dry_run else f"{BGRN}LIVE{RESET}"
+        print(f"\n  {BCYN}Watching:{RESET}  {base}  [{mode}]")
+        print(f"  {MUTED}Ctrl+C to stop.{RESET}\n")
         try:
             while True:
                 time.sleep(1)
@@ -102,5 +91,10 @@ def run_watch(
     observer.stop()
     observer.join()
 
-# monkey-patch quiet flag for non-tty output.py usage
-setattr(out, 'args_quiet', False)
+"""
+# fixed watch
+            if event.is_directory: return
+            src_path = event.src_path if isinstance(event.src_path, str) else str(event.src_path)
+            p = Path(src_path)
+            if p.suffix.lower() in _IN_PROGRESS: return
+"""
