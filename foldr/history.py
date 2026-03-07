@@ -198,3 +198,13 @@ def undo_operation(log_data: dict, dry_run: bool = False) -> UndoResult:
             pass
 
     return result
+
+# Foldr can undo - stores history - like git - we can rollback to previous state if needed - in case of mistakes or just to see what was done before
+# properly log its action into .foldr/history
+# Each run produces a JSON file named by timestamp + short UUID:
+#   2026-03-07_15-20-33_a1b2c3.json
+# Undo reads the latest log (or a specific --id) and moves files
+# user can rollback if not liked (with approval)
+# user can ask FOLDR to --ignore ''certain files or folders from being moved, and these will be respected in undo as well
+# just like .gitignore
+# user can add its own config - the way user want to organize (the default) and the custom (overwrite - builtin=False) and merge (builtin + custom - builtin=True) - and this will be respected in undo as well
