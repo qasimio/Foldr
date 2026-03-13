@@ -4,6 +4,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/qasimio/foldr/blob/main/LICENSE)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/foldr?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLUE&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/foldr)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/qasimio/Foldr)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#)
 [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-pink?logo=github)](https://github.com/sponsors/qasimio)
 
