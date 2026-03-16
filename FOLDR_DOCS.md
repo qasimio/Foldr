@@ -257,17 +257,17 @@ When you press **Y**, a modal dialog appears:
 
 ```
 ╔══ ⚡ Execute File Moves ══════════════╗
-║                                        ║
-║   This will move 18 files             ║
-║   from  Downloads/                    ║
-║   into  5 category folders.           ║
-║                                        ║
-║   This operation can be undone with:  ║
-║     foldr undo                        ║
-║                                        ║
-║  ── ──────────────────────────── ──   ║
-║    ✗ Cancel         ✓ Execute         ║
-╚════════════════════════════════════════╝
+║                                      ║
+║   This will move 18 files            ║
+║   from  Downloads/                   ║
+║   into  5 category folders.          ║
+║                                      ║
+║   This operation can be undone with: ║
+║     foldr undo                       ║
+║                                      ║
+║  ── ──────────────────────────── ──  ║
+║    ✗ Cancel         ✓ Execute        ║
+╚══════════════════════════════════════╝
 ```
 
 Use `←` `→` to navigate buttons, `Enter` to confirm.  

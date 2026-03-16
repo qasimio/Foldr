@@ -3,232 +3,274 @@ foldr.tui
 ~~~~~~~~~
 All interactive screens for FOLDR v4.
 
+Design principles
+-----------------
+  - Minimalist: one accent colour (steel blue), no rainbow
+  - Every destructive action has a 2-step approval (preview → confirm)
+  - TUI and CLI share the same outcome — TUI just makes it nicer
+  - Scrolling: ↑↓ keys, PgUp/PgDn, Home/End. Mouse scroll events
+    are ignored cleanly (no crash, no jump).
+  - Buttons in TUI: ← → to select, Enter to confirm, Esc to cancel
+  - Resize: handled gracefully every frame
+
 Screens
 -------
-  splash()              0.7s animated logo on startup
-  PreviewScreen.run()   scrollable move-list + approval dialog → bool
-  ExecutionScreen ctx   live progress during file moves
-  HistoryScreen.run()   browse/undo history
-  WatchScreen           live watch-mode display (runs in thread)
-  confirm_dialog()      standalone yes/no modal → bool
-
-Architecture
-------------
-  Every screen uses term.Screen (double-buffered, row-diff renderer).
-  Only changed rows are written to stdout → zero flicker, no full clears.
-  Raw keys via term.read_key (no curses).
+  splash()                  animated startup logo
+  PreviewScreen.run()       file-move approval → bool
+  ExecutionScreen ctx       live progress during moves
+  HistoryScreen.run()       browse all ops, undo any
+  WatchScreen               live event log
+  confirm_dialog()          reusable yes/no modal
+  mode_picker()             first-run mode selection
 """
 from __future__ import annotations
 import sys, time, threading
 from pathlib import Path
 
 from foldr.term import (
-    Screen, read_key, term_wh, strip, vlen, truncate, pad_to,
-    box_top, box_mid, box_bot, box_row, box_sep, pbar, SPINNER,
-    cat_fg, cat_icon, fmt_size,
-    RESET, BOLD, DIM, MUTED, ACCENT,
-    BCYN, CYN, BGRN, GRN, BYLW, YLW,
-    BMAG, BRED, RED, BBLU, BLU, BWHT, WHT, BBLK,
+    Screen, read_key, term_wh, strip, vlen, truncate, pad_to, centre,
+    box_top, box_bot, box_sep, box_row, pbar, SPINNER,
+    cat_fg, cat_icon, op_icon, fmt_size,
+    RESET, BOLD, DIM, ITAL, UNDER,
+    BWHT, WHT, BBLK, BCYN, BGRN, BYLW, BRED, BBLU, BBLK,
     bg256, fg256, rgb_bg, rgb_fg,
+    BG_BASE, BG_PANEL, BG_HEADER, BG_SEL, BG_MODAL,
+    FG_BRIGHT, FG_DIM, FG_MUTED,
+    ACCENT, ACCENT2, ACCENT_BG,
+    COL_OK, COL_WARN, COL_ERR, COL_BORD, COL_BORD2,
+    MUTED,
     K_UP, K_DOWN, K_LEFT, K_RIGHT, K_ENTER, K_ESC,
     K_PGUP, K_PGDN, K_HOME, K_END, K_TAB, K_CC,
 )
 
-# ── Colours / theme ────────────────────────────────────────────────────────────
-HDR_BG   = rgb_bg(0, 18, 55)
-HDR_FG   = BWHT
-BG_DARK  = bg256(233)
-BG_PANEL = bg256(234)
-BG_SEL   = bg256(24)
-BG_DRY   = rgb_bg(60, 45, 0)
-COL_BORD = fg256(60)
-COL_ACC2 = rgb_fg(0,190,255)
-SEL_FG   = BWHT + BOLD
-
-# ── ASCII logo (7 rows) ────────────────────────────────────────────────────────
-_LOGO = [
-    (BCYN+BOLD, "███████╗ ██████╗ ██╗     ██████╗ ██████╗ "),
-    (BCYN+BOLD, "██╔════╝██╔═══██╗██║     ██╔══██╗██╔══██╗"),
-    (CYN +BOLD, "█████╗  ██║   ██║██║     ██║  ██║██████╔╝"),
-    (CYN,       "██╔══╝  ██║   ██║██║     ██║  ██║██╔══██╗"),
-    (BCYN,      "██║     ╚██████╔╝███████╗██████╔╝██║  ██║"),
-    (BCYN,      "╚═╝      ╚═════╝ ╚══════╝╚═════╝ ╚═╝  ╚═╝"),
+# ── Chrome helpers ─────────────────────────────────────────────────────────────
+_LOGO_LINES = [
+    "  ┌─┐  ┌─┐  ┬    ┌┬┐  ┬─┐",
+    "  ├┤   │ │  │     ││   ├┬┘",
+    "  └    └─┘  ┴─┘  ─┴┘  ┴└─",
 ]
 
-def _render_screen_bg(scr: Screen, w: int, h: int) -> None:
-    """Fill entire screen with dark background."""
-    bg = BG_DARK + " "*w + RESET
-    for r in range(h): scr.fill(r, bg)
+def _bg(scr: Screen, w: int, h: int) -> None:
+    row = BG_BASE + " "*w + RESET
+    for r in range(h): scr.fill(r, row)
 
-def _render_header(scr: Screen, w: int, title: str,
-                   tag: str, tag_col: str, path_str: str = "") -> None:
-    """Row 0: full-width header bar."""
-    path_part = f"  {MUTED}📁 {path_str}{RESET}" if path_str else ""
-    left  = f"{HDR_BG}{HDR_FG}{BOLD}  ◈  FOLDR   {RESET}{HDR_BG}{WHT}{title}{RESET}{HDR_BG}{path_part}{RESET}"
-    right = f"{HDR_BG}  {tag_col}{BOLD}{RESET}{HDR_BG}{tag_col} {tag} {RESET}"
-    # Fill row with header bg
-    scr.fill(0, HDR_BG + " "*w + RESET)
-    # Left side
-    scr.fill(0, left + HDR_BG + " "*(w - vlen(strip(left)) - vlen(strip(right))) + right + RESET)
+def _header(scr: Screen, w: int, title: str, tag: str = "", tag_col: str = "") -> None:
+    """Row 0: clean dark header."""
+    logo = ACCENT+BOLD+" FOLDR "+RESET
+    sep  = FG_MUTED+"│"+RESET
+    t    = " "+FG_DIM+title+RESET if title else ""
+    right = ""
+    if tag:
+        tc = tag_col or FG_DIM
+        right = "  "+tc+tag+RESET+"  "
+    mid = " "*(max(0, w - vlen(strip(logo+sep+t)) - vlen(strip(right)) - 1))
+    scr.fill(0, BG_HEADER+logo+sep+t+mid+right+RESET)
 
-def _render_footer(scr: Screen, w: int, row: int,
-                   hints: list[tuple[str,str]]) -> None:
-    """Single-row hint bar at the bottom."""
-    BG = bg256(235)
+def _footer(scr: Screen, w: int, row: int, hints: list[tuple[str,str]]) -> None:
+    """Bottom row: key hints."""
+    bg   = bg256(232)
     parts = []
-    for key, desc in hints:
-        parts.append(f"{BG}{BYLW+BOLD} {key} {RESET}{BG}{WHT} {desc} {RESET}{BG}{MUTED}│{RESET}")
+    for k, desc in hints:
+        parts.append(bg+ACCENT+BOLD+" "+k+" "+RESET+bg+FG_DIM+" "+desc+"  "+RESET)
     line = "".join(parts)
-    scr.fill(row, BG + " "*w + RESET)
-    scr.fill(row, " " + line)
+    fill = " "*max(0, w-vlen(strip(line)))
+    scr.fill(row, bg+line+fill+RESET)
+
+def _rule_row(scr: Screen, w: int, row: int, title: str = "") -> None:
+    """Horizontal divider row."""
+    if title:
+        t   = f"  {FG_DIM}{title}{RESET}  "
+        pad = w - vlen(strip(t)) - 2
+        scr.fill(row, BG_PANEL+COL_BORD+"─"+RESET+t+BG_PANEL+COL_BORD+"─"*max(0,pad)+RESET)
+    else:
+        scr.fill(row, BG_PANEL+COL_BORD+"─"*w+RESET)
 
 # ── Splash ─────────────────────────────────────────────────────────────────────
-def splash(duration: float = 0.7) -> None:
+def splash(duration: float = 0.5) -> None:
     scr = Screen()
     scr.enter()
     try:
-        w, h = scr.w, scr.h
-        frames = 7
-        logo_h = len(_LOGO) + 3
-        top    = max(1, (h - logo_h) // 2)
-        for f in range(frames):
+        w, h  = scr.w, scr.h
+        lines = [
+            "",
+            ACCENT+BOLD+" ╔═══╗  ╔═══╗  ╦    ╔╦╗  ╦═╗"+RESET,
+            ACCENT+BOLD+" ╠╣   ║  ║ ║  ║     ║║║   ╠╦╝"+RESET,
+            FG_DIM+"  ╚   ╚═╝  ╚═╝  ╚═╝  ╩ ╩  ╩╚═"+RESET,
+            "",
+            FG_MUTED+"  Smart File Organizer  ·  v4"+RESET,
+        ]
+        top  = max(1, (h - len(lines)) // 2)
+        lw   = max(vlen(strip(l)) for l in lines)
+        lc   = max(0, (w - lw) // 2)
+        steps = 6
+        for step in range(steps):
             scr.clear_back()
-            # Gradient background
-            for r in range(h):
-                d = min(3, int(r/h * 4))
-                scr.fill(r, bg256(232+d) + " "*w + RESET)
-            # Logo lines (staggered reveal)
-            for i, (col, txt) in enumerate(_LOGO):
-                if i <= f:
-                    lw   = vlen(txt)
-                    lcol = max(0, (w - lw) // 2)
-                    scr.fill(top+i, " "*lcol + col + txt + RESET)
-            # Tagline
-            if f >= 4:
-                sub  = f"  {MUTED}v4 · Smart File Organizer · github.com/qasimio/Foldr{RESET}"
-                scol = max(0, (w - vlen(strip(sub))) // 2)
-                scr.fill(top + len(_LOGO) + 1, " "*scol + sub)
-            # Loading dots
-            dot_s = BCYN + "●"*(f%4+1) + fg256(236) + "●"*(3-f%4) + RESET
-            scr.fill(top + len(_LOGO) + 2, " "*((w-3)//2) + dot_s)
+            for r in range(h): scr.fill(r, BG_BASE+" "*w+RESET)
+            for i, l in enumerate(lines):
+                if i <= step:
+                    scr.fill(top+i, " "*lc+l)
             scr.flush()
-            time.sleep(duration / frames)
-        time.sleep(0.1)
+            time.sleep(duration / steps)
+        time.sleep(0.08)
     finally:
         scr.exit()
 
 
 # ── confirm_dialog ─────────────────────────────────────────────────────────────
-def confirm_dialog(scr: Screen, title: str, body_lines: list[str],
-                   yes_label: str = " ✓ Yes ", no_label: str = " ✗ Cancel ",
-                   danger: bool = False) -> bool:
+def confirm_dialog(
+    scr: Screen,
+    title: str,
+    body_lines: list[str],
+    yes_label: str = " Confirm ",
+    no_label:  str = " Cancel  ",
+    danger:    bool = False,
+) -> bool:
     """
-    Blocking modal dialog drawn onto `scr`.
-    Returns True = confirmed, False = cancelled.
-    Default selection is CANCEL (safe default).
+    Blocking modal. Default selection = Cancel (safe).
+    Returns True = confirmed.
+
+    Draws on top of whatever is in scr._back. Each row the dialog
+    occupies is padded to full terminal width so no ghost content
+    bleeds through from the background.
     """
     w, h = scr.w, scr.h
-    border_col = BRED if danger else BCYN
+    border = COL_ERR if danger else COL_BORD2
 
-    body_vlen = max((vlen(l) for l in body_lines), default=20)
-    box_w = min(w - 6, max(52, body_vlen + 8))
-    box_h = len(body_lines) + 7
-    box_r = max(1, (h - box_h) // 2)
-    box_c = max(0, (w - box_w) // 2)
+    body_w   = max((vlen(strip(l)) for l in body_lines), default=30)
+    box_w    = min(w - 4, max(50, body_w + 10))
+    box_h    = len(body_lines) + 7
+    box_r    = max(1, (h - box_h) // 2)
+    box_c    = max(0, (w - box_w) // 2)
 
-    sel = 0  # 0 = cancel (safe default)
+    sel = 0   # 0 = Cancel (safe default)
 
     while True:
-        # We only redraw the dialog area to avoid flickering
-        scr.fill(box_r, box_top(box_w, title, col=border_col, tcol=BYLW+BOLD) if not danger
-                        else box_top(box_w, title, col=BRED, tcol=BYLW+BOLD))
-        # Offset for box start column
-        def put(row: int, content: str) -> None:
-            # Pad content to full terminal width so right side is cleared
-            left_pad  = " " * box_c
-            right_pad = " " * max(0, w - box_c - vlen(strip(content)))
-            scr.fill(row, BG_DARK + left_pad + content + right_pad + RESET)
+        # Full-width row clear prevents ghosts
+        clear = BG_MODAL + " "*w + RESET
 
-        put(box_r, box_top(box_w, title, col=border_col, tcol=BYLW+BOLD))
-        put(box_r+1, box_mid(box_w, col=border_col))
+        def put(r: int, content: str) -> None:
+            lp   = " "*box_c
+            rp   = " "*max(0, w - box_c - vlen(strip(content)))
+            scr.fill(r, BG_MODAL+lp+content+rp+RESET)
+
+        # Shadow row above
+        scr.fill(box_r-1, clear)
+        put(box_r, box_top(box_w, title, col=border, tcol=ACCENT2+BOLD))
+        put(box_r+1, border+"║"+RESET+BG_MODAL+" "*(box_w-2)+border+"║"+RESET)
 
         for i, bl in enumerate(body_lines):
-            bw = box_w - 4
-            line = pad_to(truncate(bl, bw), bw)
-            put(box_r+2+i, border_col + "║" + RESET + "  " + line + "  " + border_col + "║" + RESET)
+            inner = box_w - 4
+            line  = pad_to(truncate(bl, inner), inner)
+            put(box_r+2+i, border+"║"+RESET+BG_MODAL+"  "+line+"  "+border+"║"+RESET)
 
         sep_r = box_r + 2 + len(body_lines)
-        put(sep_r,   box_sep(box_w, col=border_col))
-        put(sep_r+1, box_mid(box_w, col=border_col))
+        put(sep_r,   box_sep(box_w, col=border))
+        put(sep_r+1, border+"║"+RESET+BG_MODAL+" "*(box_w-2)+border+"║"+RESET)
 
-        # Buttons row
-        no_s  = (BG_SEL + SEL_FG if sel==0 else MUTED) + f" ◀ {no_label} ▶ " + RESET
-        yes_s = (bg256(22)+BGRN+BOLD if sel==1 else MUTED) + f" ◀ {yes_label} ▶ " + RESET
-        btn_gap = box_w - 4 - vlen(strip(no_s)) - vlen(strip(yes_s))
-        gap = " " * max(2, btn_gap // 2)
-        put(sep_r+2, border_col + "║" + RESET + "  " + no_s + gap + yes_s + "  " + border_col + "║" + RESET)
+        # Buttons
+        no_sty  = (BG_SEL+FG_BRIGHT+BOLD if sel==0 else BG_MODAL+FG_DIM)
+        yes_col = COL_ERR if danger else COL_OK
+        yes_sty = (BG_MODAL+yes_col+BOLD if sel==1 else BG_MODAL+FG_DIM)
+        no_btn  = no_sty+f"  {no_label}  "+RESET
+        yes_btn = yes_sty+f"  {yes_label}  "+RESET
+        gap     = max(2, box_w - 4 - vlen(strip(no_btn)) - vlen(strip(yes_btn)))
+        put(sep_r+2, border+"║"+RESET+BG_MODAL+"  "+no_btn+" "*gap+yes_btn+"  "+border+"║"+RESET)
 
-        hint = f"  {MUTED}← →  navigate    Enter  confirm    Esc  cancel{RESET}"
-        hint_pad = pad_to(truncate(hint, box_w-4), box_w-4)
-        put(sep_r+3, border_col + "║" + RESET + "  " + hint_pad + "  " + border_col + "║" + RESET)
-        put(sep_r+4, box_bot(box_w, col=border_col))
+        hint = centre(FG_MUTED+"← → select   Enter confirm   Esc cancel"+RESET, box_w-4)
+        put(sep_r+3, border+"║"+RESET+BG_MODAL+"  "+hint+"  "+border+"║"+RESET)
+        put(sep_r+4, box_bot(box_w, col=border))
+        scr.fill(sep_r+5, clear)   # shadow below
 
         scr.flush()
         k = read_key()
+        if not k: continue
 
         if k in (K_LEFT, K_RIGHT, K_TAB, "h", "l"):
             sel = 1 - sel
         elif k == K_ENTER:
             return sel == 1
-        elif k in (K_ESC, K_CC, "q", "Q", "n", "N"):
-            return False
         elif k in ("y", "Y"):
             return True
+        elif k in ("n", "N", K_ESC, K_CC, "q", "Q"):
+            return False
+
+
+# ── mode_picker ────────────────────────────────────────────────────────────────
+def mode_picker() -> str:
+    """
+    First-run screen: ask user to choose TUI or CLI mode.
+    Returns "tui" or "cli".
+    """
+    scr = Screen()
+    scr.enter()
+    sel = 0  # 0=TUI, 1=CLI
+    try:
+        while True:
+            scr.resize()
+            w, h = scr.w, scr.h
+            _bg(scr, w, h)
+            _header(scr, w, "First Run Setup")
+
+            lines = [
+                "",
+                ACCENT+BOLD+"  Choose your preferred output mode"+RESET,
+                "",
+                FG_DIM+"  This is saved to ~/.foldr/prefs.json and applied every run."+RESET,
+                FG_DIM+"  Change anytime with:  "+ACCENT+"foldr config --mode tui|cli"+RESET,
+                "",
+            ]
+            top = max(2, (h - 14) // 2)
+            for i, l in enumerate(lines):
+                scr.fill(top+i, BG_BASE+l+RESET)
+
+            r = top + len(lines)
+
+            def btn(label: str, desc: str, is_sel: bool, row: int) -> None:
+                bg   = BG_SEL+ACCENT if is_sel else BG_PANEL+FG_DIM
+                arr  = ACCENT+" ▶ " if is_sel else "   "
+                desc_col = FG_DIM if not is_sel else FG_BRIGHT
+                bw   = min(60, w-4)
+                lc   = max(0, (w-bw)//2)
+                line = bg+arr+BOLD+label+RESET+(BG_SEL if is_sel else BG_PANEL)+FG_DIM+"  –  "+RESET+desc_col+desc+RESET
+                padded = pad_to(line, lc+bw)
+                scr.fill(row, " "*lc+padded+RESET)
+
+            btn("TUI Mode", "full interactive screens, progress bars, history browser", sel==0, r)
+            scr.fill(r+1, "")
+            btn("CLI Mode", "clean text output, works in pipes and scripts",           sel==1, r+2)
+            scr.fill(r+3, "")
+            scr.fill(r+4, centre(FG_MUTED+"↑↓ select   Enter confirm"+RESET, w))
+            _footer(scr, w, h-1, [("↑↓","select"),("Enter","confirm")])
+            scr.flush()
+
+            k = read_key()
+            if not k: continue
+            if k in (K_UP,"k"):   sel = 0
+            if k in (K_DOWN,"j"): sel = 1
+            if k in (K_TAB,):     sel = 1-sel
+            if k == K_ENTER:      return "tui" if sel==0 else "cli"
+            if k in (K_ESC,K_CC): return "tui"
+    finally:
+        scr.exit()
 
 
 # ── PreviewScreen ──────────────────────────────────────────────────────────────
 class PreviewScreen:
     """
-    Full-screen preview: scrollable move list + approval gate.
-
-    Layout (top to bottom)
-    ──────────────────────
-     0        header bar
-     1        blank (spacer)
-     2..L+1   move list (scrollable, boxed)
-     L+2      selected-item detail strip
-     L+3..S   category bar chart (boxed)
-     S+1      dry-run banner  (only when --dry-run)
-     S+2/-1   footer hints
+    Scrollable file-move preview + 2-step approval.
+    Returns True = confirmed.
     """
     def __init__(self, records: list, base: Path, dry_run: bool):
         self.records  = records
         self.base     = base
         self.dry_run  = dry_run
-        # Build category counts
-        self.cat_counts: dict[str,int] = {}
+        self.cursor   = 0
+        self.scroll   = 0
+        self._cat_counts: dict[str,int] = {}
         for r in records:
-            self.cat_counts[r.category] = self.cat_counts.get(r.category, 0) + 1
-        self.sorted_cats = sorted(self.cat_counts.items(), key=lambda x: -x[1])
-        # Format display lines for the list
-        self._lines = self._fmt_lines()
-        # Scroll state
-        self.cursor = 0
-        self.scroll = 0
-
-    def _fmt_lines(self) -> list[str]:
-        out = []
-        for r in self.records:
-            dest = Path(r.destination).parent.name
-            col  = cat_fg(r.category)
-            icon = cat_icon(r.category)
-            out.append(
-                f"{col}{BOLD}{r.filename}{RESET}"
-                f"  {MUTED}→{RESET}  "
-                f"{col}{icon} {dest}/{RESET}"
-                f"  {MUTED}{r.category}{RESET}"
-            )
-        return out
+            self._cat_counts[r.category] = self._cat_counts.get(r.category,0)+1
+        self._sorted_cats = sorted(self._cat_counts.items(), key=lambda x:-x[1])
+        self._show_help   = False
 
     def run(self) -> bool:
         scr = Screen()
@@ -238,293 +280,290 @@ class PreviewScreen:
         finally:
             scr.exit()
 
-    # ── layout math (called every frame to handle resize) ──────────────────────
-    def _layout(self, w: int, h: int) -> dict:
-        n_cats   = len(self.sorted_cats)
-        stats_h  = min(n_cats + 2, 10)          # box: border + rows
-        footer_h = 1
-        dry_h    = 1 if self.dry_run else 0
-        header_h = 1
-        spacer   = 1
-        detail_h = 1
-        # Remaining rows for the list box (minimum 5)
-        list_h = max(5, h - header_h - spacer - detail_h - stats_h - dry_h - footer_h - 2)
-        list_inner = list_h - 2        # rows inside the box borders
-
+    # ── Layout ─────────────────────────────────────────────────────────────────
+    def _layout(self, w:int, h:int) -> dict:
+        n_cats  = len(self._sorted_cats)
+        stats_h = min(n_cats+3, 10)
+        dry_h   = 1 if self.dry_run else 0
+        # header(1) + gap(1) + list_box + detail(1) + stats_box + dry(0/1) + footer(1)
+        fixed   = 1+1+1+stats_h+dry_h+1
+        list_h  = max(5, h-fixed)
+        inner   = list_h - 2
         return dict(
-            header=0,
-            spacer=1,
-            list_top=2,
-            list_h=list_h,
-            list_inner=list_inner,
-            detail=2 + list_h,
-            stats_top=2 + list_h + 1,
-            stats_h=stats_h,
-            dry_row=2 + list_h + 1 + stats_h + (1 if dry_h else -99),
-            footer=h - 1,
+            header=0, gap=1,
+            list_top=2, list_h=list_h, inner=inner,
+            detail=2+list_h,
+            stats_top=2+list_h+1, stats_h=stats_h,
+            dry_row=2+list_h+1+stats_h,
+            footer=h-1,
         )
 
-    def _loop(self, scr: Screen) -> bool:
+    # ── Event loop ──────────────────────────────────────────────────────────────
+    def _loop(self, scr:Screen) -> bool:
         while True:
             scr.resize()
-            w, h = scr.w, scr.h
-            L = self._layout(w, h)
-            self._draw(scr, w, h, L)
+            w,h = scr.w, scr.h
+            L   = self._layout(w,h)
+            self._draw(scr,w,h,L)
             k = read_key()
-            # Navigation
-            if k in (K_UP, "k"):     self._move(-1, L["list_inner"])
-            elif k in (K_DOWN,"j"):  self._move(+1, L["list_inner"])
-            elif k == K_PGUP:        self._move(-L["list_inner"], L["list_inner"])
-            elif k == K_PGDN:        self._move(+L["list_inner"], L["list_inner"])
-            elif k == K_HOME:        self.cursor=0; self.scroll=0
+            if not k: continue
+
+            if self._show_help:
+                self._show_help = False
+                continue
+
+            n = len(self.records)
+            inner = L["inner"]
+            if k in (K_UP,"k"):
+                self.cursor = max(0,self.cursor-1)
+            elif k in (K_DOWN,"j"):
+                self.cursor = min(n-1,self.cursor+1)
+            elif k == K_PGUP:
+                self.cursor = max(0,self.cursor-inner)
+            elif k == K_PGDN:
+                self.cursor = min(n-1,self.cursor+inner)
+            elif k == K_HOME:
+                self.cursor = 0
             elif k == K_END:
-                self.cursor=max(0,len(self._lines)-1)
-                self.scroll=max(0,len(self._lines)-L["list_inner"])
-            # Action
-            elif k in ("y","Y") and not self.dry_run:
+                self.cursor = max(0,n-1)
+            elif k == "?":
+                self._show_help = True
+            elif k in (K_ENTER,"y","Y") and not self.dry_run:
                 confirmed = confirm_dialog(
                     scr,
-                    title=" ⚡ Execute File Moves ",
+                    title=" Confirm Move ",
                     body_lines=[
-                        f"{BWHT}Move {BCYN+BOLD}{len(self.records)}{RESET+BWHT} files from {BCYN}{self.base.name}/{RESET}",
-                        f"{BWHT}into {BCYN+BOLD}{len(self.cat_counts)}{RESET+BWHT} category folders.{RESET}",
                         "",
-                        f"{MUTED}Reversible with:  {BCYN}foldr undo{RESET}",
+                        f"  Move {ACCENT+BOLD}{n}{RESET} files from {ACCENT}{self.base.name}/{RESET}",
+                        f"  into {ACCENT+BOLD}{len(self._cat_counts)}{RESET} category folders.",
+                        "",
+                        f"  {FG_MUTED}Reversible with:  {ACCENT}foldr undo{RESET}",
+                        "",
                     ],
-                    yes_label=" ✓ Execute ",
-                    no_label=" ✗ Cancel  ",
+                    yes_label=" Move Files ",
+                    no_label=" Cancel     ",
                 )
                 return confirmed
             elif k in ("n","N",K_ESC,K_CC,"q","Q"):
                 return False
-            elif k == "?":
-                self._help(scr, w, h)
 
-    def _move(self, delta: int, inner: int) -> None:
-        n = len(self._lines)
-        self.cursor = max(0, min(n-1, self.cursor + delta))
-        if self.cursor < self.scroll:
-            self.scroll = self.cursor
-        elif self.cursor >= self.scroll + inner:
-            self.scroll = self.cursor - inner + 1
+            # Adjust scroll
+            if self.cursor < self.scroll:
+                self.scroll = self.cursor
+            elif self.cursor >= self.scroll + inner:
+                self.scroll = self.cursor - inner + 1
 
-    def _draw(self, scr: Screen, w: int, h: int, L: dict) -> None:
-        # Background
-        _render_screen_bg(scr, w, h)
+    # ── Draw ───────────────────────────────────────────────────────────────────
+    def _draw(self, scr:Screen, w:int, h:int, L:dict) -> None:
+        _bg(scr,w,h)
 
-        # Header
-        tag     = "DRY-RUN ─ NO FILES MOVE" if self.dry_run else "PREVIEW ─ APPROVAL REQUIRED"
-        tag_col = BYLW if self.dry_run else BCYN
-        _render_header(scr, w, "Interactive Preview", tag, tag_col, str(self.base))
+        tag = "preview only — no files will move" if self.dry_run else "review & confirm"
+        _header(scr,w,"Interactive Preview",tag,FG_MUTED)
 
-        # Move list box
-        n        = len(self._lines)
-        inner    = L["list_inner"]
-        list_top = L["list_top"]
-        title_str = f"Planned Moves  ({n} files)"
+        n     = len(self.records)
+        inner = L["inner"]
+        lt    = L["list_top"]
 
-        scr.fill(list_top, BG_PANEL + box_top(w, title_str, col=COL_BORD, tcol=COL_ACC2+BOLD) + RESET)
+        # List box
+        scr.fill(lt, BG_PANEL+box_top(w,f" {n} files to move ", col=COL_BORD, tcol=ACCENT+BOLD)+RESET)
         for i in range(inner):
-            abs_i = self.scroll + i
-            row_r = list_top + 1 + i
-            if abs_i < n:
-                is_sel = (abs_i == self.cursor)
-                raw = self._lines[abs_i]
-                # Build content
-                prefix = f"{BGRN+BOLD}▶ {RESET}" if is_sel else "  "
-                content = truncate(raw, w - 6)
-                inner_w = w - 4   # 2 border ║ + 2 padding
+            ai   = self.scroll + i
+            rr   = lt+1+i
+            if ai < n:
+                r      = self.records[ai]
+                is_sel = (ai == self.cursor)
+                dest   = Path(r.destination).parent.name
+                col    = cat_fg(r.category)
+                ico    = cat_icon(r.category)
+                # Build row content
+                fname_w = max(20, w//3)
+                cat_w   = 14
+                inner_w = w - 4
+                fname   = truncate(r.filename, fname_w)
+                arr     = FG_MUTED+" → "+RESET
+                dest_s  = col+ico+" "+dest+"/"+RESET
+                cat_s   = FG_MUTED+" ["+r.category+"]"+RESET
+                content = pad_to(fname,fname_w)+arr+dest_s+cat_s
+                body    = truncate(content, inner_w-2)
+
                 if is_sel:
-                    body = pad_to(strip(prefix) + strip(content), inner_w)
-                    line = (COL_BORD + "║" + RESET + BG_SEL + SEL_FG + " " + body + " " + RESET + COL_BORD + "║" + RESET)
+                    bg = BG_SEL
+                    scr.fill(rr, BG_PANEL+COL_BORD+"║"+RESET+bg+ACCENT+"▶ "+RESET+bg+
+                             FG_BRIGHT+pad_to(strip(body),inner_w-2)+RESET+
+                             BG_PANEL+COL_BORD+"║"+RESET)
                 else:
-                    body = truncate(prefix + content, inner_w - 1)
-                    line = (COL_BORD + "║" + RESET + BG_PANEL + " " + body + " "*(inner_w - vlen(strip(body)) - 1) + " " + RESET + COL_BORD + "║" + RESET)
-                scr.fill(row_r, line)
+                    scr.fill(rr, BG_PANEL+COL_BORD+"║"+RESET+BG_PANEL+"  "+body+
+                             " "*max(0,inner_w-vlen(strip(body))-2)+
+                             BG_PANEL+COL_BORD+"║"+RESET)
             else:
-                scr.fill(row_r, COL_BORD + "║" + RESET + BG_PANEL + " "*(w-2) + RESET + COL_BORD + "║" + RESET)
-        # Scrollbar — insert before right border ║
+                scr.fill(rr, BG_PANEL+COL_BORD+"║"+BG_PANEL+" "*(w-2)+RESET+COL_BORD+"║"+RESET)
+
+        # Scrollbar
         if n > inner:
-            sb_h   = max(1, inner * inner // n)
-            sb_pos = int(self.scroll / max(1, n-inner) * (inner - sb_h))
+            sb_h   = max(1, inner*inner//n)
+            sb_pos = int(self.scroll/max(1,n-inner)*(inner-sb_h))
             for i in range(inner):
-                ch    = ("█" if sb_pos <= i < sb_pos+sb_h else fg256(236)+"░")
-                row_r = list_top + 1 + i
-                # Row is: ║ body ║ — insert scrollbar char before last ║
-                row   = scr._back[row_r]
-                # Strip the trailing ║+RESET and replace with sb+║+RESET
-                suffix = COL_BORD + "║" + RESET
+                rr  = lt+1+i
+                ch  = ACCENT+"█" if sb_pos<=i<sb_pos+sb_h else FG_MUTED+"│"
+                row = scr._back[rr]
+                # Insert before the last ║
+                suffix = COL_BORD+"║"+RESET
                 if row.endswith(suffix):
-                    row = row[:-len(suffix)] + MUTED + ch + RESET + suffix
-                    scr.fill(row_r, row)
-        scr.fill(list_top + inner + 1,
-                 BG_PANEL + box_bot(w, col=COL_BORD) + RESET)
+                    scr.fill(rr, row[:-len(suffix)]+ch+RESET+suffix)
+
+        scr.fill(lt+inner+1, BG_PANEL+box_bot(w,col=COL_BORD)+RESET)
 
         # Detail strip
-        if self._lines:
-            r  = self.records[self.cursor]
+        if self.records:
+            r    = self.records[self.cursor]
             dest = Path(r.destination).parent.name
             col  = cat_fg(r.category)
-            icon = cat_icon(r.category)
-            detail = (f"  {MUTED}▸  Selected:{RESET}  "
-                      f"{col+BOLD}{icon} {r.filename}{RESET}"
-                      f"  {MUTED}→{RESET}  {col}{dest}/{RESET}"
-                      f"  {MUTED}[{r.category}]{RESET}")
-            scr.fill(L["detail"], bg256(234) + pad_to(detail, w) + RESET)
+            line = (FG_MUTED+"  selected: "+RESET+
+                    col+BOLD+r.filename+RESET+
+                    FG_MUTED+" → "+RESET+col+dest+"/"+RESET+
+                    FG_MUTED+"  ["+r.category+"]"+RESET)
+            scr.fill(L["detail"], bg256(233)+pad_to(line,w)+RESET)
 
-        # Category bar chart (stats box)
-        st      = L["stats_top"]
-        bar_w   = max(12, w // 3)
-        total_f = max(1, len(self.records))
-        scr.fill(st, BG_PANEL + box_top(w, " Category Breakdown ", col=COL_BORD, tcol=COL_ACC2+BOLD) + RESET)
-        max_rows = L["stats_h"] - 2
-        for i, (cat, cnt) in enumerate(self.sorted_cats[:max_rows]):
+        # Category bar chart
+        st    = L["stats_top"]
+        total = max(1,n)
+        bar_w = max(10,(w-40)//2)
+        scr.fill(st, BG_PANEL+box_top(w," breakdown ",col=COL_BORD,tcol=FG_DIM+BOLD)+RESET)
+        max_rows = L["stats_h"]-2
+        for i,(cat,cnt) in enumerate(self._sorted_cats[:max_rows]):
             col  = cat_fg(cat)
-            icon = cat_icon(cat)
-            pct  = cnt / total_f
-            fill = max(1, int(pct * bar_w))
-            bar  = col + "█"*fill + MUTED + "░"*(bar_w-fill) + RESET
+            ico  = cat_icon(cat)
+            pct  = cnt/total
+            fill = max(1,int(pct*bar_w))
+            bar  = col+"█"*fill+COL_BORD+"░"*(bar_w-fill)+RESET
             pcts = f"{pct*100:4.1f}%"
-            row  = (f"  {col+BOLD}{icon} {pad_to(cat,18)}{RESET}"
-                    f"  {bar}  {col+BOLD}{cnt:>4}{RESET}  {MUTED}{pcts}{RESET}")
-            scr.fill(st+1+i, BG_PANEL + row + RESET)
-        # Summary count in top-right of stats box
-        summary = (f"  {BCYN+BOLD}{len(self.records)}{RESET} files"
-                   f"  {MUTED}·{RESET}  {BCYN+BOLD}{len(self.cat_counts)}{RESET} categories  ")
-        sr = st + 1
-        # Right-align summary
-        cur = scr._back[sr]
-        sv  = vlen(strip(summary))
-        if sv < w - 4:
-            scr.fill(sr, cur.rstrip(RESET) + " "*(w - len(strip(cur)) - sv - 2) + summary + RESET)
-        scr.fill(st + L["stats_h"] - 1, BG_PANEL + box_bot(w, col=COL_BORD) + RESET)
+            row  = (f"  {col}{ico}{RESET}  {FG_DIM}{pad_to(cat,16)}{RESET}"
+                    f"  {bar}  {ACCENT}{cnt:>4}{RESET}  {FG_MUTED}{pcts}{RESET}")
+            scr.fill(st+1+i, BG_PANEL+row+RESET)
+        # Summary counts right side of first stats row
+        summ = f"{ACCENT+BOLD}{n}{RESET}{FG_DIM} files · {ACCENT+BOLD}{len(self._cat_counts)}{RESET}{FG_DIM} categories  "+RESET
+        r0 = st+1
+        cur = scr._back[r0]
+        sv  = vlen(strip(summ))
+        pad = max(0, w-vlen(strip(cur))-sv)
+        scr.fill(r0, cur+FG_MUTED+" "*pad+summ+RESET)
+        scr.fill(st+L["stats_h"]-1, BG_PANEL+box_bot(w,col=COL_BORD)+RESET)
 
         # Dry-run banner
         if self.dry_run:
-            banner = (BG_DRY + BYLW+BOLD
-                      + "  ● DRY RUN — NO FILES WILL BE MOVED — THIS IS A PREVIEW ONLY  "
-                      + RESET)
-            bv  = vlen(strip(banner))
-            pad = " "*max(0,(w-bv)//2)
-            scr.fill(L["dry_row"], BG_DRY + " "*w + RESET)
-            scr.fill(L["dry_row"], pad + banner)
+            dr = L["dry_row"]
+            banner = centre(COL_WARN+BOLD+"  preview mode — no files will be moved  "+RESET,w)
+            scr.fill(dr, bg256(232)+banner+RESET)
 
         # Footer
         if self.dry_run:
-            hints = [("↑↓","scroll"),("PgUp/Dn","fast"),("Q/Esc","exit")]
+            hints = [("↑↓","scroll"),("Q / Esc","exit")]
         else:
-            hints = [("Y","EXECUTE"),("N/Esc","cancel"),("↑↓","scroll"),("PgUp/Dn","fast"),("?","help")]
-        _render_footer(scr, w, L["footer"], hints)
+            hints = [("↑↓","scroll"),("Enter / Y","confirm move"),("N / Esc","cancel"),("?","help")]
+        _footer(scr, w, L["footer"], hints)
+
+        # Help overlay
+        if self._show_help:
+            self._draw_help(scr,w,h)
 
         scr.flush()
 
-    def _help(self, scr: Screen, w: int, h: int) -> None:
+    def _draw_help(self, scr:Screen, w:int, h:int) -> None:
         lines = [
-            f"  {BCYN+BOLD}Keyboard Shortcuts{RESET}",
-            "",
-            f"  {BYLW}↑ / k{RESET}         Scroll up",
-            f"  {BYLW}↓ / j{RESET}         Scroll down",
-            f"  {BYLW}PgUp / PgDn{RESET}   Fast scroll",
-            f"  {BYLW}Home / End{RESET}    Jump to top / bottom",
-            "",
-            f"  {BGRN}Y{RESET}             Open confirmation dialog",
-            f"  {BRED}N / Esc{RESET}       Cancel — nothing moves",
-            "",
-            f"  {MUTED}Colour key:{RESET}",
-            f"  {BCYN}■{RESET} Docs  {BGRN}■{RESET} Images  {BYLW}■{RESET} Video  {BMAG}■{RESET} Audio  {BRED}■{RESET} Archives  {BBLU}■{RESET} Code",
-            "",
-            f"  {MUTED}Press any key to close{RESET}",
+            ACCENT+BOLD+"  Keyboard Reference"+RESET,"",
+            f"  {ACCENT}↑ / k{RESET}         scroll up",
+            f"  {ACCENT}↓ / j{RESET}         scroll down",
+            f"  {ACCENT}PgUp / PgDn{RESET}   fast scroll",
+            f"  {ACCENT}Home / End{RESET}     first / last file","",
+            f"  {COL_OK}Enter / Y{RESET}      open confirm dialog",
+            f"  {COL_ERR}N / Esc{RESET}        cancel — nothing moves","",
+            f"  {FG_MUTED}Press any key to close{RESET}",
         ]
-        bw = min(58, w-4)
-        bh = len(lines)+4
-        br = max(1,(h-bh)//2)
-        bc = max(0,(w-bw)//2)
+        bw  = min(50, w-4)
+        bh  = len(lines)+4
+        br  = max(1,(h-bh)//2)
+        bc  = max(0,(w-bw)//2)
         pad = " "*bc
-        scr.fill(br, pad + box_top(bw," Help ", col=BCYN, tcol=BCYN+BOLD))
-        for i,l in enumerate(lines[:bh-2]):
-            inner_w = bw-4
-            scr.fill(br+1+i, pad + BCYN+"║"+RESET+"  " + pad_to(truncate(l,inner_w),inner_w) + "  "+BCYN+"║"+RESET)
-        scr.fill(br+len(lines)+1, pad + box_bot(bw, col=BCYN))
-        scr.flush()
-        read_key()
+        scr.fill(br, pad+box_top(bw," Help ",col=COL_BORD2,tcol=ACCENT+BOLD))
+        for i,l in enumerate(lines):
+            iw   = bw-4
+            scr.fill(br+1+i, pad+COL_BORD2+"║"+RESET+BG_MODAL+"  "+pad_to(truncate(l,iw),iw)+"  "+COL_BORD2+"║"+RESET)
+        scr.fill(br+1+len(lines), pad+box_bot(bw,col=COL_BORD2))
 
 
 # ── ExecutionScreen ────────────────────────────────────────────────────────────
 class ExecutionScreen:
-    """Context manager: live progress display during file moves."""
-    def __init__(self, total: int, base: Path):
+    """Context manager: live progress during organize."""
+    def __init__(self, total:int, base:Path):
         self.total   = total
         self.base    = base
         self.done    = 0
-        self.current = ""
-        self.log: list[tuple[str,str,str]] = []  # (cat, fname, dest)
+        self.log: list[tuple[str,str,str]] = []
         self._scr    = Screen()
-        self._lock   = threading.Lock()
         self._start  = time.monotonic()
+        self._lock   = threading.Lock()
 
     def __enter__(self):
-        self._scr.enter()
-        return self
+        self._scr.enter(); return self
 
-    def __exit__(self, *_):
+    def __exit__(self,*_):
         self._scr.exit()
 
-    def update(self, filename: str, dest: str, category: str) -> None:
+    def update(self, filename:str, dest:str, category:str) -> None:
         with self._lock:
             self.done += 1
-            self.current = filename
-            self.log.append((category, filename, dest))
+            self.log.append((category,filename,dest))
         self._draw()
 
     def _draw(self) -> None:
-        scr = self._scr
-        scr.resize()
-        w, h = scr.w, scr.h
-        elapsed = time.monotonic() - self._start
-        pct     = self.done / max(1, self.total)
+        scr = self._scr; scr.resize()
+        w,h = scr.w, scr.h
+        elapsed = time.monotonic()-self._start
+        pct     = self.done/max(1,self.total)
 
-        _render_screen_bg(scr, w, h)
-        _render_header(scr, w, "Executing", "MOVING FILES", BGRN, str(self.base))
+        _bg(scr,w,h)
+        _header(scr,w,"Organizing files")
 
-        # Progress box
-        pb_row = 3
-        scr.fill(pb_row, BG_PANEL + box_top(w," Progress ", col=COL_BORD, tcol=BGRN+BOLD))
-        bar_w = max(10, w-20)
-        bar   = pbar(pct, bar_w)
-        scr.fill(pb_row+1, BG_PANEL + f"  {bar}  " + RESET)
-        rate   = self.done / max(0.01, elapsed)
-        remain = max(0,(self.total-self.done)/max(0.01,rate))
-        stats  = (f"  {BCYN+BOLD}{self.done}{RESET}/{BCYN}{self.total}{RESET} files"
-                  f"  {MUTED}·{RESET}  {BGRN+BOLD}{pct*100:.0f}%{RESET}"
-                  f"  {MUTED}·{RESET}  {BYLW}{elapsed:.1f}s{RESET} elapsed"
-                  f"  {MUTED}· ~{remain:.0f}s left{RESET}")
-        scr.fill(pb_row+2, BG_PANEL + stats + RESET)
-        if self.current:
-            scr.fill(pb_row+3, BG_PANEL + f"  {MUTED}▸  {BCYN}{self.current}{RESET}")
-        scr.fill(pb_row+4, BG_PANEL + box_bot(w, col=COL_BORD))
+        # Progress
+        pb_w  = max(10,w-24)
+        bar   = pbar(pct,pb_w)
+        rate  = self.done/max(0.01,elapsed)
+        eta   = max(0,(self.total-self.done)/max(0.01,rate))
+        p1    = (f"  {bar}  {ACCENT+BOLD}{pct*100:.0f}%{RESET}  "
+                 f"{FG_DIM}{self.done}/{self.total}{RESET}")
+        p2    = (f"  {FG_MUTED}elapsed {elapsed:.1f}s  ·  ~{eta:.0f}s remaining{RESET}")
+        scr.fill(2, BG_PANEL+p1+RESET)
+        scr.fill(3, BG_PANEL+p2+RESET)
+        scr.fill(4, BG_PANEL+COL_BORD+"─"*w+RESET)
 
-        # Live log
-        log_top = pb_row + 6
-        log_h   = h - log_top - 2
-        scr.fill(log_top-1, BG_PANEL + box_top(w," Recent Moves ", col=COL_BORD, tcol=COL_ACC2+BOLD))
+        # Recent moves log
+        log_h = h-7
+        scr.fill(5, BG_PANEL+box_top(w," recent moves ",col=COL_BORD,tcol=FG_DIM+BOLD)+RESET)
         with self._lock:
             visible = self.log[-(log_h):]
         for i,(cat,fname,dest) in enumerate(visible):
-            col  = cat_fg(cat)
-            icon = cat_icon(cat)
-            line = (f"  {col}{icon}{RESET}  {col+BOLD}{truncate(fname,40)}{RESET}"
-                    f"  {MUTED}→{RESET}  {col}{dest}/{RESET}")
-            scr.fill(log_top+i, BG_PANEL + line + RESET)
-        scr.fill(log_top + log_h, BG_PANEL + box_bot(w, col=COL_BORD))
+            col = cat_fg(cat); ico = cat_icon(cat)
+            line= (f"  {FG_MUTED}{ico}{RESET}  {FG_DIM}{pad_to(cat,16)}{RESET}"
+                   f"  {FG_BRIGHT}{truncate(fname,38)}{RESET}"
+                   f"  {FG_MUTED}→  {RESET}{col}{dest}/{RESET}")
+            scr.fill(6+i, BG_PANEL+line+RESET)
+        scr.fill(6+log_h, BG_PANEL+box_bot(w,col=COL_BORD)+RESET)
+        _footer(scr,w,h-1,[])
         scr.flush()
 
 
 # ── HistoryScreen ──────────────────────────────────────────────────────────────
 class HistoryScreen:
-    def __init__(self, entries: list[dict]):
+    """
+    Browse ALL history entries (organize + dedup + undo).
+    Select any entry and press U to undo it.
+    """
+    def __init__(self, entries:list[dict]):
         self.entries = entries
-        self._cursor = 0
-        self._scroll = 0
+        self.cursor  = 0
+        self.scroll  = 0
+        self._mode   = "list"   # "list" | "detail"
+        self._detail_scroll = 0
 
     def run(self) -> tuple[str|None, str|None]:
         scr = Screen()
@@ -534,131 +573,158 @@ class HistoryScreen:
         finally:
             scr.exit()
 
-    def _loop(self, scr: Screen) -> tuple[str|None, str|None]:
+    def _loop(self, scr:Screen) -> tuple[str|None,str|None]:
         n = len(self.entries)
         while True:
             scr.resize()
-            w, h = scr.w, scr.h
-            inner = h - 4
-            self._draw(scr, w, h, inner)
-            k = read_key()
-            if k in (K_UP,"k"):     self._mv(-1, inner)
-            elif k in (K_DOWN,"j"): self._mv(+1, inner)
-            elif k == K_PGUP:       self._mv(-inner, inner)
-            elif k == K_PGDN:       self._mv(+inner, inner)
-            elif k in (K_ENTER,"d","D") and n:
-                self._detail(scr, self.entries[self._cursor])
-            elif k in ("u","U") and n:
-                eid = self.entries[self._cursor].get("id")
-                confirmed = confirm_dialog(
-                    scr,
-                    title=" ↩ Undo Operation ",
-                    body_lines=[
-                        f"{BWHT}Restore {BCYN+BOLD}{self.entries[self._cursor].get('total_files',0)}{RESET+BWHT} files{RESET}",
-                        f"{BWHT}from operation {BCYN+BOLD}{eid}{RESET}",
-                        f"{MUTED}Files return to their original locations.{RESET}",
-                    ],
-                    yes_label=" ↩ Undo ",
-                    no_label=" ✗ Cancel ",
-                    danger=True,
-                )
-                if confirmed:
-                    return "undo", eid
-            elif k in (K_ESC,K_CC,"q","Q"):
-                return None, None
+            w,h = scr.w, scr.h
+            inner = h-4
+            if self._mode=="list":
+                self._draw_list(scr,w,h,inner)
+                k = read_key()
+                if not k: continue
+                if k in (K_UP,"k"):
+                    self.cursor=max(0,self.cursor-1)
+                elif k in (K_DOWN,"j"):
+                    self.cursor=min(max(0,n-1),self.cursor+1)
+                elif k==K_PGUP:
+                    self.cursor=max(0,self.cursor-inner)
+                elif k==K_PGDN:
+                    self.cursor=min(max(0,n-1),self.cursor+inner)
+                elif k in (K_ENTER,"d","D") and n:
+                    self._mode="detail"; self._detail_scroll=0
+                elif k in ("u","U") and n:
+                    e = self.entries[self.cursor]
+                    op_t = e.get("op_type","organize")
+                    if op_t=="dedup":
+                        # Dedup can't be undone — show info only
+                        confirm_dialog(scr," Cannot Undo ",[
+                            "","  Dedup operations permanently delete files.",
+                            "  They cannot be restored.",""],
+                            yes_label=" OK ", no_label=" OK ")
+                        continue
+                    body = [
+                        "",
+                        f"  Restore {ACCENT+BOLD}{e.get('total_files',0)}{RESET} files",
+                        f"  from operation {ACCENT}{e.get('id','?')}{RESET}",
+                        f"  in {FG_DIM}{Path(e.get('base','?')).name}/{RESET}","",
+                        f"  {FG_MUTED}Files already moved elsewhere will be skipped.{RESET}","",
+                    ]
+                    ok = confirm_dialog(scr," Undo Operation ",body,
+                                        yes_label=" Undo ",no_label=" Cancel ",danger=True)
+                    if ok: return "undo", e.get("id")
+                elif k in (K_ESC,K_CC,"q","Q"):
+                    return None, None
+                # Scroll adjustment
+                if self.cursor<self.scroll: self.scroll=self.cursor
+                elif self.cursor>=self.scroll+inner: self.scroll=self.cursor-inner+1
 
-    def _mv(self, d: int, inner: int) -> None:
-        n = len(self.entries)
-        self._cursor = max(0, min(n-1, self._cursor+d))
-        if self._cursor < self._scroll:
-            self._scroll = self._cursor
-        elif self._cursor >= self._scroll + inner:
-            self._scroll = self._cursor - inner + 1
+            else:  # detail
+                e   = self.entries[self.cursor]
+                recs= e.get("records",[]) if "_full" in e else []
+                if not recs and e.get("path"):
+                    import json
+                    try:
+                        full = json.loads(Path(e["path"]).read_text())
+                        e["records"] = full.get("records",[])
+                        e["_full"]   = True
+                        recs         = e["records"]
+                    except Exception:
+                        pass
+                self._draw_detail(scr,w,h,e,recs)
+                k = read_key()
+                if not k: continue
+                if k in (K_UP,"k"):   self._detail_scroll=max(0,self._detail_scroll-1)
+                elif k in (K_DOWN,"j"): self._detail_scroll+=1
+                elif k==K_PGUP:       self._detail_scroll=max(0,self._detail_scroll-10)
+                elif k==K_PGDN:       self._detail_scroll+=10
+                elif k in (K_ESC,"q","Q",K_ENTER,"b","B"): self._mode="list"
 
-    def _draw(self, scr: Screen, w: int, h: int, inner: int) -> None:
-        _render_screen_bg(scr, w, h)
-        _render_header(scr, w, "History", "OPERATION LOG", BCYN)
+    def _draw_list(self, scr:Screen, w:int, h:int, inner:int) -> None:
+        _bg(scr,w,h)
         n = len(self.entries)
-        scr.fill(1, BG_PANEL + box_top(w, f" Operations  ({n} entries) ",
-                                       col=COL_BORD, tcol=COL_ACC2+BOLD) + RESET)
+        _header(scr,w,"History","all operations",FG_MUTED)
+        scr.fill(1, BG_PANEL+box_top(w,f" {n} operations ",col=COL_BORD,tcol=FG_DIM+BOLD)+RESET)
         for i in range(inner):
-            abs_i = self._scroll + i
-            rr    = 2 + i
-            if abs_i < n:
-                e    = self.entries[abs_i]
-                ts   = e.get("timestamp","")[:19].replace("T"," ")
-                base = Path(e.get("base","?")).name
-                tot  = e.get("total_files",0)
-                eid  = e.get("id","?")[:6]
-                is_sel = (abs_i == self._cursor)
-                line = (f"  {MUTED}{ts:<12}{RESET}"
-                        f"  {BCYN+BOLD}{base:<25}{RESET}"
-                        f"  {BGRN+BOLD}{tot:>4}{RESET} files"
-                        f"  {MUTED}id:{eid}{RESET}")
+            ai  = self.scroll+i; rr = 2+i
+            if ai<n:
+                e     = self.entries[ai]
+                is_sel= (ai==self.cursor)
+                ts    = e.get("timestamp","")[:16].replace("T"," ")
+                base  = Path(e.get("base","?")).name
+                tot   = e.get("total_files",0)
+                eid   = e.get("id","?")
+                ot    = e.get("op_type","organize")
+                oi    = op_icon(ot)
+                oc    = {"organize":ACCENT,"dedup":COL_ERR,"undo":COL_WARN}.get(ot,FG_DIM)
+
+                row   = (f"  {oc}{oi}{RESET}  {FG_MUTED}{ts}{RESET}"
+                         f"  {FG_BRIGHT}{pad_to(base,22)}{RESET}"
+                         f"  {FG_DIM}{tot:>3} files{RESET}"
+                         f"  {FG_MUTED}{eid}{RESET}")
+
                 if is_sel:
-                    scr.fill(rr, BG_SEL + SEL_FG + "▶ " + pad_to(strip(line), w-3) + RESET)
+                    scr.fill(rr, BG_PANEL+COL_BORD+"║"+RESET+BG_SEL+ACCENT+"▶ "+RESET+
+                             BG_SEL+FG_BRIGHT+pad_to(strip(row),w-5)+RESET+
+                             BG_PANEL+COL_BORD+"║"+RESET)
                 else:
-                    scr.fill(rr, BG_PANEL + line + RESET)
+                    scr.fill(rr, BG_PANEL+COL_BORD+"║"+RESET+BG_PANEL+row+
+                             " "*max(0,w-vlen(strip(row))-4)+
+                             BG_PANEL+COL_BORD+"║"+RESET)
             else:
-                scr.fill(rr, BG_PANEL + " "*w + RESET)
-        scr.fill(2+inner, BG_PANEL + box_bot(w, col=COL_BORD) + RESET)
-        _render_footer(scr, w, h-1, [("↑↓","navigate"),("Enter/D","detail"),("U","undo selected"),("Q/Esc","quit")])
+                scr.fill(rr, BG_PANEL+COL_BORD+"║"+BG_PANEL+" "*(w-2)+COL_BORD+"║"+RESET)
+        scr.fill(2+inner, BG_PANEL+box_bot(w,col=COL_BORD)+RESET)
+        _footer(scr,w,h-1,[("↑↓","navigate"),("Enter","details"),("U","undo selected"),("Q","quit")])
         scr.flush()
 
-    def _detail(self, scr: Screen, entry: dict) -> None:
-        records = entry.get("records",[])
+    def _draw_detail(self, scr:Screen, w:int, h:int, e:dict, recs:list) -> None:
+        _bg(scr,w,h)
+        eid = e.get("id","?"); tot = e.get("total_files",0)
+        ts  = e.get("timestamp","")[:19].replace("T"," ")
+        _header(scr,w,f"Detail: {eid}")
+        scr.fill(1, BG_PANEL+f"  {FG_MUTED}{ts}  ·  {RESET}{ACCENT+BOLD}{tot}{RESET}{FG_DIM} files  ·  {Path(e.get('base','?')).name}/{RESET}")
+        scr.fill(2, BG_PANEL+COL_BORD+"─"*w+RESET)
+
+        inner = h-5
         lines = []
-        for r in records:
-            col  = cat_fg(r.get("category",""))
-            icon = cat_icon(r.get("category",""))
-            dest = Path(r.get("destination","")).parent.name
-            lines.append(f"  {col}{icon}{RESET}  {col+BOLD}{r.get('filename',''):<38}{RESET}  {MUTED}→{RESET}  {col}{dest}/{RESET}")
-        scroll = 0
-        while True:
-            scr.resize()
-            w, h = scr.w, scr.h
-            inner = h - 5
-            _render_screen_bg(scr, w, h)
-            title = f" Detail: {entry.get('id','')} · {len(records)} files "
-            scr.fill(1, BG_PANEL + box_top(w, title, col=BCYN, tcol=BCYN+BOLD) + RESET)
-            for i in range(inner):
-                idx = scroll + i
-                scr.fill(2+i, BG_PANEL + (lines[idx] if idx < len(lines) else " "*w) + RESET)
-            scr.fill(2+inner, BG_PANEL + box_bot(w, col=BCYN) + RESET)
-            _render_footer(scr, w, h-1, [("↑↓","scroll"),("Q/Esc","back")])
-            scr.flush()
-            k = read_key()
-            if k in (K_UP,"k"):     scroll = max(0, scroll-1)
-            elif k in (K_DOWN,"j"): scroll = min(max(0,len(lines)-inner), scroll+1)
-            elif k == K_PGUP:       scroll = max(0, scroll-inner)
-            elif k == K_PGDN:       scroll = min(max(0,len(lines)-inner), scroll+inner)
-            elif k in (K_ESC,K_CC,"q","Q",K_ENTER): break
+        for r in recs:
+            col = cat_fg(r.get("category",""))
+            ico = cat_icon(r.get("category",""))
+            dest= Path(r.get("destination","")).parent.name
+            lines.append(f"  {FG_MUTED}{ico}{RESET}  {FG_BRIGHT}{pad_to(r.get('filename',''),36)}{RESET}  {FG_MUTED}→  {RESET}{col}{dest}/{RESET}")
+
+        self._detail_scroll = min(self._detail_scroll, max(0,len(lines)-inner))
+        for i in range(inner):
+            idx = self._detail_scroll+i
+            scr.fill(3+i, BG_PANEL+(lines[idx] if idx<len(lines) else "")+RESET)
+        scr.fill(3+inner, BG_PANEL+COL_BORD+"─"*w+RESET)
+        _footer(scr,w,h-1,[("↑↓","scroll"),("B / Esc","back to list")])
+        scr.flush()
 
 
 # ── WatchScreen ────────────────────────────────────────────────────────────────
 class WatchScreen:
-    def __init__(self, base: Path, dry_run: bool):
+    def __init__(self, base:Path, dry_run:bool):
         self.base    = base
         self.dry_run = dry_run
-        self._log: list[tuple[str,str,str,str]] = []  # (ts, cat, fname, dest)
-        self._lock  = threading.Lock()
-        self._start = time.monotonic()
-        self._stop  = threading.Event()
-        self._scr   = Screen()
+        self._log: list[tuple[str,str,str,str]] = []
+        self._lock   = threading.Lock()
+        self._start  = time.monotonic()
+        self._stop   = threading.Event()
+        self._scr    = Screen()
 
-    def add_event(self, filename: str, dest: str, category: str) -> None:
+    def add_event(self, filename:str, dest:str, category:str) -> None:
         with self._lock:
             ts = time.strftime("%H:%M:%S")
-            self._log.append((ts, category, filename, dest))
-            if len(self._log) > 1000:
-                self._log = self._log[-1000:]
+            self._log.append((ts,category,filename,dest))
+            if len(self._log)>500: self._log=self._log[-500:]
 
     def run_blocking(self) -> None:
         self._scr.enter()
         try:
             while not self._stop.is_set():
                 self._draw()
-                time.sleep(0.2)
+                time.sleep(0.25)
         finally:
             self._scr.exit()
 
@@ -666,35 +732,26 @@ class WatchScreen:
         self._stop.set()
 
     def _draw(self) -> None:
-        scr = self._scr
-        scr.resize()
-        w, h = scr.w, scr.h
-        _render_screen_bg(scr, w, h)
-
-        tag = "WATCH · DRY RUN" if self.dry_run else "WATCH · LIVE"
-        col = BYLW if self.dry_run else BGRN
-        _render_header(scr, w, "Watch Mode", tag, col, str(self.base))
-
-        elapsed = int(time.monotonic() - self._start)
-        count   = len(self._log)
-        scr.fill(1, f"  {MUTED}Uptime: {elapsed}s{RESET}  {MUTED}·{RESET}  "
-                    f"{BCYN+BOLD}{count}{RESET} files processed  {MUTED}·  Ctrl+C to stop{RESET}")
-
+        scr=self._scr; scr.resize()
+        w,h=scr.w,scr.h
+        elapsed=int(time.monotonic()-self._start)
+        count=len(self._log)
+        _bg(scr,w,h)
+        tag="preview only" if self.dry_run else "live · organizing on arrival"
+        _header(scr,w,"Watch Mode",tag,COL_WARN if self.dry_run else COL_OK)
+        scr.fill(1, BG_PANEL+f"  {FG_MUTED}uptime {elapsed}s  ·  {RESET}{ACCENT+BOLD}{count}{RESET}{FG_DIM} files organized{RESET}")
+        scr.fill(2, BG_PANEL+COL_BORD+"─"*w+RESET)
         # Column header
-        hdr = (f"  {MUTED+BOLD}{'TIME':<10}  {'CATEGORY':<18}  {'FILE':<40}  DESTINATION{RESET}")
-        scr.fill(2, bg256(235) + pad_to(hdr, w) + RESET)
-
-        log_h = h - 5
-        scr.fill(3, BG_PANEL + box_top(w," Live Events ", col=COL_BORD, tcol=COL_ACC2+BOLD) + RESET)
+        scr.fill(3, bg256(232)+FG_MUTED+f"  {'TIME':<10}  {'CATEGORY':<16}  {'FILE':<38}  DEST"+RESET)
+        log_h = h-6
+        scr.fill(4, BG_PANEL+box_top(w,col=COL_BORD)+RESET)
         with self._lock:
-            visible = self._log[-(log_h):]
+            visible=self._log[-(log_h):]
         for i,(ts,cat,fname,dest) in enumerate(visible):
-            col  = cat_fg(cat)
-            icon = cat_icon(cat)
-            line = (f"  {MUTED}{ts:<10}{RESET}  {col}{icon} {cat:<16}{RESET}"
-                    f"  {col+BOLD}{truncate(fname,40)}{RESET}"
-                    f"  {MUTED}→{RESET}  {col}{dest}/{RESET}")
-            scr.fill(4+i, BG_PANEL + line + RESET)
-        scr.fill(4+log_h, BG_PANEL + box_bot(w, col=COL_BORD) + RESET)
-        _render_footer(scr, w, h-1, [("Ctrl+C","stop watching")])
+            col=cat_fg(cat); ico=cat_icon(cat)
+            line=(f"  {FG_MUTED}{ts:<10}{RESET}  {col}{pad_to(ico+' '+cat,16)}{RESET}"
+                  f"  {FG_BRIGHT}{truncate(fname,38)}{RESET}  {FG_MUTED}→  {RESET}{col}{dest}/{RESET}")
+            scr.fill(5+i, BG_PANEL+line+RESET)
+        scr.fill(5+log_h, BG_PANEL+box_bot(w,col=COL_BORD)+RESET)
+        _footer(scr,w,h-1,[("Ctrl+C","stop watching")])
         scr.flush()
