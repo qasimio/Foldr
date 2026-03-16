@@ -174,6 +174,21 @@ def _move_file(
 # Single-directory organiser (always targets root categories)
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _classify_file(
+    file_path: Path,
+    template: dict,
+) -> tuple[str, str] | tuple[None, None]:
+    """
+    Return (category_name, dest_folder_name) for a single file, or (None, None).
+    Used by watch mode to scope moves to one file at a time.
+    """
+    ext = file_path.suffix.lower()
+    for cat_name, cat in template.items():
+        if ext in cat.get("ext", set()):
+            return cat_name, cat["folder"]
+    return None, None
+
+
 def _organize_dir(
     directory: Path,
     root_categories: dict,
