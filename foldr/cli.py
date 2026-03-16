@@ -70,12 +70,26 @@ def _rule(title: str = "") -> None:
     print(FG_MUTED+"─"*side+RESET+" "+BOLD+title+RESET+" "+FG_MUTED+"─"*side+RESET)
 
 def _banner() -> None:
-    if _QUIET: return
+    if _QUIET:
+        return
+
     print()
-    print(f"  {ACCENT+BOLD} ╔═══╗  ╔═══╗  ╦    ╔╦╗  ╦═╗{RESET}")
-    print(f"  {ACCENT+BOLD} ╠╣   ║  ║ ║  ║     ║║║   ╠╦╝{RESET}")
-    print(f"  {FG_DIM}  ╚   ╚═╝  ╚═╝  ╚═╝  ╩ ╩  ╩╚═{RESET}")
-    print(f"  {FG_MUTED}v4  ·  Smart File Organizer  ·  github.com/qasimio/Foldr{RESET}\n")
+
+    logo = [
+        f"{ACCENT+BOLD}   ███████╗ ██████╗ ██╗     ██████╗ ██████╗{RESET}",
+        f"{ACCENT+BOLD}   ██╔════╝██╔═══██╗██║     ██╔══██╗██╔══██╗{RESET}",
+        f"{ACCENT+BOLD}   █████╗  ██║   ██║██║     ██║  ██║██████╔╝{RESET}",
+        f"{FG_DIM}   ██╔══╝  ██║   ██║██║     ██║  ██║██╔══██╗{RESET}",
+        f"{FG_DIM}   ██║     ╚██████╔╝███████╗██████╔╝██║  ██║{RESET}",
+        f"{FG_DIM}   ╚═╝      ╚═════╝ ╚══════╝╚═════╝ ╚═╝  ╚═╝{RESET}",
+    ]
+
+    for line in logo:
+        print(line)
+
+    print(f"{FG_MUTED}      Smart File Organizer  ·  v4{RESET}")
+    print(f"{FG_MUTED}      github.com/qasimio/Foldr{RESET}")
+    print()
 
 def _box(body: str, title: str = "", col: str = "") -> None:
     if _QUIET: return
@@ -125,7 +139,7 @@ def _summary(cat_counts:dict, moved:int, other:int,
         f"  {st}\n\n"
         f"  {ACCENT+BOLD}{moved}{RESET} moved  {FG_MUTED}·{RESET}  "
         f"{FG_DIM}{other}{RESET} unrecognised  {FG_MUTED}·{RESET}  "
-        f"{FG_DIM}{ignored}{RESET} ignored  {FG_MUTED}·{RESET}  {FG_MUTED}{elapsed:.2f}s{RESET}",
+        f"{FG_DIM}{ignored}{RESET} ignored  {FG_MUTED}·{RESET}  {FG_MUTED}{elapsed:.2f}s{RESET} ",
         col=COL_WARN if dry else COL_OK,
     )
     print()

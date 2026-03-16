@@ -45,9 +45,12 @@ from foldr.term import (
 
 # ── Chrome helpers ─────────────────────────────────────────────────────────────
 _LOGO_LINES = [
-    "  ┌─┐  ┌─┐  ┬    ┌┬┐  ┬─┐",
-    "  ├┤   │ │  │     ││   ├┬┘",
-    "  └    └─┘  ┴─┘  ─┴┘  ┴└─",
+"   ███████╗ ██████╗ ██╗     ██████╗ ██████╗ ",
+"   ██╔════╝██╔═══██╗██║     ██╔══██╗██╔══██╗",
+"   █████╗  ██║   ██║██║     ██║  ██║██████╔╝",
+"   ██╔══╝  ██║   ██║██║     ██║  ██║██╔══██╗",
+"   ██║     ╚██████╔╝███████╗██████╔╝██║  ██║",
+"   ╚═╝      ╚═════╝ ╚══════╝╚═════╝ ╚═╝  ╚═╝",
 ]
 
 def _bg(scr: Screen, w: int, h: int) -> None:
@@ -90,28 +93,71 @@ def splash(duration: float = 0.5) -> None:
     scr = Screen()
     scr.enter()
     try:
-        w, h  = scr.w, scr.h
-        lines = [
+        w, h = scr.w, scr.h
+
+        big_lines = [
             "",
-            ACCENT+BOLD+" ╔═══╗  ╔═══╗  ╦    ╔╦╗  ╦═╗"+RESET,
-            ACCENT+BOLD+" ╠╣   ║  ║ ║  ║     ║║║   ╠╦╝"+RESET,
-            FG_DIM+"  ╚   ╚═╝  ╚═╝  ╚═╝  ╩ ╩  ╩╚═"+RESET,
+            ACCENT + BOLD + "   ███████╗ ██████╗ ██╗     ██████╗ ██████╗" + RESET,
+            ACCENT + BOLD + "   ██╔════╝██╔═══██╗██║     ██╔══██╗██╔══██╗" + RESET,
+            ACCENT + BOLD + "   █████╗  ██║   ██║██║     ██║  ██║██████╔╝" + RESET,
+            FG_DIM + "   ██╔══╝  ██║   ██║██║     ██║  ██║██╔══██╗" + RESET,
+            FG_DIM + "   ██║     ╚██████╔╝███████╗██████╔╝██║  ██║" + RESET,
+            FG_DIM + "   ╚═╝      ╚═════╝ ╚══════╝╚═════╝ ╚═╝  ╚═╝" + RESET,
             "",
-            FG_MUTED+"  Smart File Organizer  ·  v4"+RESET,
+            FG_MUTED + "        Smart File Organizer  ·  v4" + RESET,
         ]
-        top  = max(1, (h - len(lines)) // 2)
-        lw   = max(vlen(strip(l)) for l in lines)
-        lc   = max(0, (w - lw) // 2)
-        steps = 6
+
+        # fallback, compact logo for very narrow/small terminals
+        compact_lines = [
+            "",
+            ACCENT + BOLD + " FOLDR  ·  Smart File Organizer" + RESET,
+        ]
+
+        # choose which logo fits
+        def fits(lines):
+            lw = max((vlen(strip(l)) for l in lines), default=0)
+            return lw + 2 <= w and len(lines) + 2 <= h
+
+        lines = big_lines if fits(big_lines) else compact_lines
+
+        top = max(1, (h - len(lines)) // 2)
+        lw = max((vlen(strip(l)) for l in lines), default=0)
+        lc = max(0, (w - lw) // 2)
+
+        steps = max(1, len(lines))
+
+        # progressive reveal
         for step in range(steps):
             scr.clear_back()
-            for r in range(h): scr.fill(r, BG_BASE+" "*w+RESET)
-            for i, l in enumerate(lines):
-                if i <= step:
-                    scr.fill(top+i, " "*lc+l)
+            for r in range(h):
+                scr.fill(r, BG_BASE + " " * w + RESET)
+
+            # show lines up to current step (inclusive)
+            for i in range(step + 1):
+                l = lines[i]
+                scr.fill(top + i, " " * lc + l)
+
             scr.flush()
             time.sleep(duration / steps)
+
+        # tiny spinner flourish under the logo (very short)
+        try:
+            spinner = SPINNER
+        except Exception:
+            spinner = "⠋⠙⠹⠸⠼⠴⠦⠧"
+
+        spin_y = top + len(lines)
+        spin_x = lc
+        spin_end = time.time() + 0.08
+        while time.time() < spin_end:
+            frame = spinner[int(time.time() * 10) % len(spinner)]
+            scr.fill(spin_y, " " * spin_x + FG_MUTED + frame + RESET)
+            scr.flush()
+            time.sleep(0.02)
+
+        # tiny pause so the reveal isn't instantaneous
         time.sleep(0.08)
+
     finally:
         scr.exit()
 
