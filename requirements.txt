@@ -38,7 +38,7 @@ colorama>=0.4.6 ; sys_platform == "win32"
 # Python 3.11+ ships tomllib in the standard library.
 # Uncomment if you are on Python 3.10 and want ~/.foldr/config.toml:
 #
-# tomli>=2.0.1
+tomli>=2.0.1
 
 
 # ── Optional: --smart mode ────────────────────────────────────────────────────
@@ -62,4 +62,4 @@ colorama>=0.4.6 ; sys_platform == "win32"
 #
 # Uncomment whichever applies:
 # python-magic>=0.4.27        # Linux / macOS
-# python-magic-bin>=0.4.14    # Windows
+python-magic-bin>=0.4.14    # Windows
