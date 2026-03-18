@@ -2,64 +2,56 @@ CATEGORIES_TEMPLATE = {
     "Documents": {
         "folder": "Documents",
         "ext": {
-            ".pdf", ".doc", ".docx", ".odt", ".rtf",
-            ".tex", ".bib", ".md", ".pages"
+            ".bib", ".doc", ".docx", ".md", ".odt", ".pages", ".pdf", ".rtf", ".tex"
         },
     },
     "Text & Data": {
         "folder": "Text_Data",
         "ext": {
-            ".txt", ".md", ".csv", ".tsv", ".json",
-            ".ndjson", ".xml", ".yaml", ".yml", ".toml",
-            ".log", ".ini", ".cfg", ".conf", ".env", ".properties"
+            ".ndjson", ".properties", ".toml", ".xml", ".yaml", ".yml", ".txt", ".env"
         },
     },
     "Images": {
         "folder": "Images",
         "ext": {
-            ".png", ".jpg", ".jpeg", ".gif",
-            ".bmp", ".tiff", ".tif", ".ico", ".webp",
-            ".heic", ".heif", ".raw", ".cr2", ".orf", ".nef"
+            ".bmp", ".cr2", ".gif", ".heic", ".heif", ".ico", ".jpg", ".jpeg", ".nef",
+            ".orf", ".png", ".raw", ".tif", ".tiff", ".webp"
         },
     },
     "Vector Graphics": {
         "folder": "Vector_Graphics",
         "ext": {
-            ".svg", ".eps", ".ai", ".ps", ".pdf"  # pdf sometimes used for vector art
+            ".ai", ".eps", ".ps", ".svg"
         },
     },
     "Videos": {
         "folder": "Videos",
         "ext": {
-            ".mp4", ".mkv", ".mov", ".avi", ".wmv",
-            ".flv", ".webm", ".m4v", ".mpeg", ".mpg"
+            ".avi", ".flv", ".m4v", ".mkv", ".mp4", ".mpeg", ".mpg", ".mov", ".webm", ".wmv"
         },
     },
     "Audio": {
         "folder": "Audio",
         "ext": {
-            ".mp3", ".wav", ".aac", ".flac", ".ogg",
-            ".m4a", ".wma", ".opus"
+            ".aac", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav", ".wma"
         },
     },
     "Subtitles": {
         "folder": "Subtitles",
         "ext": {
-            ".srt", ".vtt", ".ass", ".ssa", ".sub"
+            ".ass", ".ssa", ".sub", ".srt", ".vtt"
         },
     },
     "Archives": {
         "folder": "Archives",
         "ext": {
-            ".zip", ".rar", ".7z", ".tar", ".gz",
-            ".bz2", ".xz", ".zst", ".tar.gz", ".tar.bz2",
-            ".tar.xz", ".tgz", ".tbz2"
+            ".7z", ".bz2", ".gz", ".rar", ".tar", ".tar.bz2", ".tar.gz", ".tar.xz", ".tgz", ".tbz2", ".xz", ".zst", ".zip"
         },
     },
     "Disk Images": {
         "folder": "Disk_Images",
         "ext": {
-            ".iso", ".img", ".dmg", ".vhd", ".vhdx", ".vmdk", ".bin", ".cue"
+            ".bin", ".cue", ".dmg", ".img", ".iso", ".vhd", ".vhdx", ".vmdk"
         },
     },
     "Virtualization": {
@@ -71,140 +63,167 @@ CATEGORIES_TEMPLATE = {
     "Executables": {
         "folder": "Executables",
         "ext": {
-            ".exe", ".msi", ".msix", ".app", ".deb", ".rpm",
-            ".apk", ".bin", ".run", ".jar", ".class"
+            ".app", ".class", ".exe", ".run", ".jar"
         },
     },
     "Packages": {
         "folder": "Packages",
         "ext": {
-            ".deb", ".rpm", ".apk", ".pkg", ".msi", ".msix",
-            ".whl", ".egg", ".gem", ".npm", ".tgz"
+            ".apk", ".deb", ".egg", ".gem", ".msi", ".msix", ".npm", ".pkg", ".rpm", ".whl"
         },
     },
     "Code": {
         "folder": "Code",
         "ext": {
-            ".py", ".pyc", ".ipynb", ".java", ".class", ".jar",
-            ".cpp", ".cc", ".c", ".h", ".hpp", ".cs",
-            ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",
-            ".html", ".htm", ".css", ".scss", ".less",
-            ".go", ".rs", ".php", ".pl", ".pm", ".rb", ".swift",
-            ".kt", ".kts", ".lua", ".r", ".sql", ".erl", ".ex", ".exs"
+            ".c", ".cc", ".cpp", ".cs", ".go", ".js", ".java", ".kt", ".kts",
+            ".lua", ".mjs", ".py", ".pyc", ".pm", ".rs", ".swift", ".ts", ".tsx", ".jsx",
+            ".ex", ".exs", ".erl", ".h", ".hpp", ".pkt"
         },
     },
     "Notebooks": {
         "folder": "Notebooks",
         "ext": {
-            ".ipynb", ".rmd", ".nb", ".sage"
+            ".ipynb", ".nb", ".rmd", ".sage"
         },
     },
     "Scripts": {
         "folder": "Scripts",
         "ext": {
-            ".sh", ".bash", ".zsh", ".ksh", ".csh",
-            ".ps1", ".psm1", ".fish", ".awk", ".sed",
-            ".pl", ".rb", ".groovy", ".ps1xml"
+            ".awk", ".bash", ".csh", ".fish", ".groovy", ".ksh", ".pl", ".ps1", ".ps1xml",
+            ".psm1", ".rb", ".sed", ".sh", ".zsh", ".iss"
         },
     },
     "Machine_Learning": {
         "folder": "Machine_Learning",
         "ext": {
-            ".h5", ".hdf5", ".pt", ".pth", ".onnx", ".pb",
-            ".pkl", ".joblib", ".npz", ".mat", ".sav"
+            ".h5", ".hdf5", ".joblib", ".mat", ".npz", ".onnx", ".pb", ".pkl", ".pt", ".pth", ".sav"
         },
     },
     "Databases": {
         "folder": "Databases",
         "ext": {
-            ".sql", ".db", ".sqlite", ".sqlite3", ".mdb", ".accdb",
-            ".bak", ".dump"
+            ".accdb", ".db", ".dump", ".mdb", ".sqlite", ".sqlite3", ".sql"
         },
     },
     "Spreadsheets": {
         "folder": "Spreadsheets",
         "ext": {
-            ".xls", ".xlsx", ".xlsm", ".xlsb", ".ods", ".csv", ".tsv"
+            ".csv", ".ods", ".xls", ".xlsb", ".xlsm", ".xlsx", ".tsv"
         },
     },
     "Presentations": {
         "folder": "Presentations",
         "ext": {
-            ".ppt", ".pptx", ".key", ".odp"
+            ".key", ".odp", ".ppt", ".pptx"
         },
     },
     "Fonts": {
         "folder": "Fonts",
         "ext": {
-            ".ttf", ".otf", ".woff", ".woff2", ".eot", ".pfb", ".pfa"
+            ".eot", ".pfb", ".pfa", ".otf", ".ttf", ".woff", ".woff2"
         },
     },
     "3D_Models": {
         "folder": "3D_Models",
         "ext": {
-            ".stl", ".obj", ".fbx", ".3ds", ".ply", ".blend", ".gltf", ".glb"
+            ".3ds", ".blend", ".fbx", ".gltf", ".glb", ".obj", ".ply", ".stl"
         },
     },
     "CAD": {
         "folder": "CAD",
         "ext": {
-            ".dwg", ".dxf", ".step", ".stp", ".iges", ".igs"
+            ".dwg", ".dxf", ".iges", ".igs", ".stp", ".step"
         },
     },
     "GIS": {
         "folder": "GIS",
         "ext": {
-            ".shp", ".shx", ".dbf", ".geojson", ".kml", ".kmz", ".gpx"
+            ".dbf", ".geojson", ".gpx", ".kml", ".kmz", ".shp", ".shx"
         },
     },
     "Ebooks": {
         "folder": "Ebooks",
         "ext": {
-            ".epub", ".mobi", ".azw3", ".azw", ".fb2"
+            ".azw", ".azw3", ".epub", ".fb2", ".mobi"
         },
     },
     "Web": {
         "folder": "Web",
         "ext": {
-            ".html", ".htm", ".xhtml", ".css", ".js", ".json",
-            ".map", ".wasm"
+            ".css", ".html", ".htm", ".map", ".wasm", ".xhtml", ".less"
         },
     },
     "Config_and_System": {
         "folder": "Config_System",
         "ext": {
-            ".conf", ".cfg", ".ini", ".plist", ".reg", ".sys",
-            ".service", ".socket"
+            ".conf", ".cfg", ".ini", ".plist", ".reg", ".service", ".socket", ".sys"
         },
     },
     "Certificates": {
         "folder": "Certificates",
         "ext": {
-            ".crt", ".cer", ".pem", ".key", ".pfx", ".p12", ".der"
+            ".cer", ".crt", ".der", ".key", ".p12", ".pfx", ".pem"
         },
     },
     "Logs": {
         "folder": "Logs",
         "ext": {
-            ".log", ".trace", ".out", ".err"
+            ".err", ".log", ".out", ".trace"
         },
     },
     "Licenses": {
         "folder": "Licenses",
         "ext": {
-            "LICENSE", "LICENSE.txt", "LICENCE", "COPYING"
+            "COPYING", "LICENCE", "LICENSE", "LICENSE.txt"
         },
     },
     "Subprojects": {
         "folder": "Subprojects",
         "ext": {
-            "README", "README.md", "CHANGELOG", "CHANGELOG.md"
+            "CHANGELOG", "CHANGELOG.md", "README", "README.md"
         },
     },
     "Misc": {
         "folder": "Misc",
         "ext": {
-            ".isoinfo", ".part", ".crdownload", ".tmp", ".bak"
+            ".bak", ".crdownload", ".isoinfo", ".part", ".tmp"
         },
-    }
+    },
 }
+"""
+FOLDR CATEGORIES is a dictionary that defines 31 categories of files, each with a corresponding folder name and a set of file extensions. The categories include Documents, Text & Data, Images, Vector Graphics, Videos, Audio, Subtitles, Archives, Disk Images, Virtualization, Executables, Packages, Code, Notebooks, Scripts, Machine Learning, Databases, Spreadsheets, Presentations, Fonts, 3D Models, CAD, GIS, Ebooks, Web files, Config & System files, Certificates, Logs, Licenses, Subprojects (like README and CHANGELOG), and Miscellaneous files.
+
+- Documents: 9
+- Text & Data: 8
+- Images: 15
+- Vector Graphics: 4
+- Videos: 10
+- Audio: 8
+- Subtitles: 5
+- Archives: 13
+- Disk Images: 8
+- Virtualization: 2
+- Executables: 5
+- Packages: 10
+- Code: 23
+- Notebooks: 4
+- Scripts: 14
+- Machine Learning: 11
+- Databases: 7
+- Spreadsheets: 7
+- Presentations: 4
+- Fonts: 7
+- 3D Models: 8
+- CAD: 6
+- GIS: 7
+- Ebooks: 5
+- Config & System: 8
+- Certificates: 7
+- Logs: 4
+- Licenses: 4
+- Subprojects: 4
+- Misc: 5
+
+Total: 31 categories, 239 extensions
+
+"""
