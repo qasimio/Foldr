@@ -190,3 +190,40 @@ CATEGORIES_TEMPLATE = {
         },
     },
 }
+"""
+FOLDR CATEGORIES is a dictionary that defines 31 categories of files, each with a corresponding folder name and a set of file extensions. The categories include Documents, Text & Data, Images, Vector Graphics, Videos, Audio, Subtitles, Archives, Disk Images, Virtualization, Executables, Packages, Code, Notebooks, Scripts, Machine Learning, Databases, Spreadsheets, Presentations, Fonts, 3D Models, CAD, GIS, Ebooks, Web files, Config & System files, Certificates, Logs, Licenses, Subprojects (like README and CHANGELOG), and Miscellaneous files.
+
+- Documents: 9
+- Text & Data: 8
+- Images: 15
+- Vector Graphics: 4
+- Videos: 10
+- Audio: 8
+- Subtitles: 5
+- Archives: 13
+- Disk Images: 8
+- Virtualization: 2
+- Executables: 5
+- Packages: 10
+- Code: 23
+- Notebooks: 4
+- Scripts: 14
+- Machine Learning: 11
+- Databases: 7
+- Spreadsheets: 7
+- Presentations: 4
+- Fonts: 7
+- 3D Models: 8
+- CAD: 6
+- GIS: 7
+- Ebooks: 5
+- Config & System: 8
+- Certificates: 7
+- Logs: 4
+- Licenses: 4
+- Subprojects: 4
+- Misc: 5
+
+Total: 31 categories, 239 extensions
+
+"""
