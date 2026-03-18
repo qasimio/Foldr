@@ -77,7 +77,7 @@ CATEGORIES_TEMPLATE = {
         "ext": {
             ".c", ".cc", ".cpp", ".cs", ".go", ".js", ".java", ".kt", ".kts",
             ".lua", ".mjs", ".py", ".pyc", ".pm", ".rs", ".swift", ".ts", ".tsx", ".jsx",
-            ".ex", ".exs", ".erl", ".h", ".hpp"
+            ".ex", ".exs", ".erl", ".h", ".hpp", ".pkt"
         },
     },
     "Notebooks": {
@@ -90,7 +90,7 @@ CATEGORIES_TEMPLATE = {
         "folder": "Scripts",
         "ext": {
             ".awk", ".bash", ".csh", ".fish", ".groovy", ".ksh", ".pl", ".ps1", ".ps1xml",
-            ".psm1", ".rb", ".sed", ".sh", ".zsh"
+            ".psm1", ".rb", ".sed", ".sh", ".zsh", ".iss"
         },
     },
     "Machine_Learning": {

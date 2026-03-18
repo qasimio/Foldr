@@ -1,685 +1,634 @@
-# FOLDR — Complete Functionality Reference
+# FOLDR — Complete Functionality Guide
 
-> Version 4 · Built by Muhammad Qasim (@qasimio)
+**Author:** Muhammad Qasim  
+**GitHub:** https://github.com/qasimio/Foldr  
+**Version:** 4.1
 
 ---
 
-## Installation
+## Table of Contents
+
+1. [Install](#install)
+2. [pip install foldr vs pip install foldr\[all\]](#pip-extras-explained)
+3. [Quick Start](#quick-start)
+4. [All Commands](#all-commands)
+5. [Ignore Rules](#ignore-rules)
+6. [Custom Categories (config.toml)](#custom-categories)
+7. [Watch Mode](#watch-mode)
+8. [History & Undo](#history--undo)
+9. [Dedup](#dedup)
+10. [Per-OS File Locations](#per-os-file-locations)
+11. [Config File Locations](#config-file-locations)
+12. [Windows-Specific Notes](#windows-specific-notes)
+13. [macOS-Specific Notes](#macos-specific-notes)
+14. [Linux-Specific Notes](#linux-specific-notes)
+
+---
+
+## Install
 
 ```bash
 pip install foldr
 ```
 
-Requires Python 3.9+. Optional extras:
+That's it. FOLDR works immediately on Linux, macOS, and Windows with no additional setup.
+
+---
+
+## pip install foldr vs pip install foldr\[all\]
+
+When you run `pip install foldr` you get the **core** package.  
+When you run `pip install foldr[all]` you get **extra optional features**.
+
+Think of it like buying a car (base) vs. buying it with optional extras (sunroof, leather seats).
+
+| Feature | `pip install foldr` | `pip install foldr[all]` |
+|---------|--------------------|-----------------------|
+| Organize files by type | ✓ | ✓ |
+| Undo operations | ✓ | ✓ |
+| Watch mode | ✓ | ✓ |
+| History browser | ✓ | ✓ |
+| Pretty tables in output | ✓ | ✓ |
+| Windows ANSI colours | ✓ | ✓ |
+| TOML config on Python 3.10 | ✗ | ✓ |
+| `--smart` content detection | ✗ | ✓ |
+
+**When do you need `foldr[all]`?**
+
+- You use a custom `config.toml` AND you are on Python 3.10 (3.11+ has it built-in).
+- You want `--smart` mode to catch misnamed files (e.g. a `.jpg` that is actually a PDF).
+
+**`--smart` also needs a system library:**
 
 ```bash
-pip install python-magic   # --smart MIME detection
-pip install watchdog       # watch mode (already bundled as dependency)
-pip install tomli          # --config TOML support on Python < 3.11
+# Linux (Debian/Ubuntu)
+sudo apt install libmagic1
+pip install "foldr[all]"
+
+# macOS
+brew install libmagic
+pip install "foldr[all]"
+
+# Windows (DLL included — no system lib needed)
+pip install "foldr[all]"
 ```
 
 ---
 
-## Quick Reference
-
-| Command | What it does |
-|---------|-------------|
-| `foldr` | Organize current directory (prompts for confirmation) |
-| `foldr <dir>` | Organize a specific directory |
-| `foldr <dir> --dry-run` | Preview only — nothing moves |
-| `foldr <dir> --interactive` | TUI preview → approve before executing |
-| `foldr <dir> --recursive` | Organize all subdirectories too |
-| `foldr <dir> --recursive --max-depth 2` | Limit recursion to 2 levels |
-| `foldr <dir> --smart` | MIME-type content detection |
-| `foldr <dir> --deduplicate` | Find and remove duplicate files |
-| `foldr <dir> --ignore "*.log"` | Skip matching files |
-| `foldr <dir> --config foldr.toml` | Custom category config |
-| `foldr watch <dir>` | Live auto-organizer (runs forever) |
-| `foldr undo` | Undo the last operation |
-| `foldr undo --id <ID>` | Undo a specific past operation |
-| `foldr history` | See recent operations |
-
----
-
-## 1. Basic Organization
-
-### Organize a directory
+## Quick Start
 
 ```bash
+# Show what would happen (nothing moves)
+foldr ~/Downloads --preview
+
+# Organize (preview first, then ask to confirm)
 foldr ~/Downloads
+
+# Undo the last operation
+foldr undo
+
+# See history of all operations
+foldr history
 ```
 
-Files are grouped by extension into category subfolders:
-- `Documents/` — `.pdf`, `.docx`, `.tex`, etc.
-- `Images/` — `.png`, `.jpg`, `.webp`, etc.
-- `Videos/` — `.mp4`, `.mkv`, `.mov`, etc.
-- `Audio/` — `.mp3`, `.wav`, `.flac`, etc.
-- `Code/` — `.py`, `.js`, `.ts`, `.html`, etc.
-- … (30+ categories total — see `config.py` for the full list)
+On **Windows**, always quote paths that may have spaces:
 
-Existing folders in the directory are **never touched or moved**.
-
-### Preview first (dry-run)
-
-```bash
-foldr ~/Downloads --dry-run
-```
-
-Shows exactly what would happen. Zero files are moved. Safe to run at any time.
-
-### Organize current directory
-
-```bash
-cd ~/Downloads
-foldr
-```
-
-FOLDR detects no path was given, shows the target, and asks for confirmation before proceeding.
-
-### Paths with spaces
-
-Always quote paths that contain spaces:
-
-```bash
+```powershell
+foldr "D:\My Downloads" --preview
 foldr "D:\My Downloads"
-foldr "/home/user/My Files" --dry-run
 ```
 
 ---
 
-## 2. Recursive Mode
+## All Commands
 
-### Organize all nested subdirectories
-
-```bash
-foldr ~/Downloads --recursive
-```
-
-**Key behavior:** All files — regardless of how deep they are in the tree — move to the **root-level** category folders. Sub-directories do not grow their own `Code/`, `Documents/` etc. trees.
-
-Example:
-```
-Before:
-  Downloads/
-    report.pdf
-    projects/webapp/index.html
-    projects/webapp/style.css
-
-After:
-  Downloads/
-    Documents/report.pdf
-    Code/index.html
-    Code/style.css
-    projects/webapp/           ← folder left in place
-```
-
-### Limit recursion depth
+### Organize
 
 ```bash
-foldr ~/Downloads --recursive --max-depth 2
+foldr <path>                          # organize (shows preview, asks to confirm)
+foldr <path> --preview                # dry-run — shows plan, nothing moves
+foldr <path> --recursive              # also organize files in subdirectories
+foldr <path> --recursive --depth 2    # limit to 2 levels of subdirectories
+foldr <path> --follow-links           # follow symbolic links
+foldr <path> --smart                  # detect file type by content, not extension
+foldr <path> --verbose                # print every file as it moves
+foldr <path> --quiet                  # no output (for scripts, CI, cron)
+foldr <path> --config ~/custom.toml   # use a different category config
 ```
 
-- `--max-depth 1` — only immediate subdirectories
-- `--max-depth 2` — two levels deep
-- Omit for unlimited depth
-
-### Follow symbolic links
+### Ignore
 
 ```bash
-foldr ~/Downloads --recursive --follow-symlinks
+foldr <path> --ignore "*.log" "tmp/"  # skip these patterns this run
+foldr <path> --no-ignore              # disable ALL ignore rules for this run
+foldr <path> --show-ignored           # list which files were skipped and why
 ```
 
-By default, symlinked directories are **skipped** to prevent infinite loops. Enable with this flag. Circular symlinks are still detected and halted automatically.
-
-### Safety confirmation
-
-Running `--recursive` without `--dry-run` always shows a confirmation prompt before any files are moved.
-
----
-
-## 3. Interactive Mode (TUI Preview)
+### Duplicates
 
 ```bash
-foldr ~/Downloads --interactive
+# ⚠ IRREVERSIBLE — always preview first
+foldr <path> --dedup keep-newest --preview
+foldr <path> --dedup keep-newest      # delete older duplicates
+foldr <path> --dedup keep-largest     # delete smaller duplicates
+foldr <path> --dedup keep-oldest      # delete newer copies, keep originals
+foldr <path> --recursive --dedup keep-newest   # dedup across subdirectories too
 ```
 
-Shows a full terminal preview before executing:
-- Category overview table with file counts and bar chart
-- Complete file-by-file listing (first 30 shown)
-- Stats: total to move, unmatched, ignored
-- `y/n` prompt — nothing moves until you confirm
-
-Combine with any other flags:
+### Watch mode (background auto-organizer)
 
 ```bash
-foldr ~/Downloads --interactive --recursive --max-depth 2
-foldr ~/Downloads --interactive --config ~/my-categories.toml
+foldr watch <path>                    # start background watcher
+foldr watch <path> --recursive        # watch subdirectories too
+foldr watch <path> --startup          # also start on login/reboot
+foldr watch <path> --preview          # watch but don't move (log only)
+foldr watches                         # list all active watchers
+foldr unwatch <path>                  # stop a specific watcher
+foldr unwatch                         # interactive picker
+```
+
+### Undo & History
+
+```bash
+foldr undo                            # undo the most recent operation
+foldr undo --id a1b2c3                # undo a specific operation by ID
+foldr undo --preview                  # show what would be restored, don't move
+foldr history                         # list last 50 operations
+foldr history --all                   # list everything ever
+```
+
+### Config
+
+```bash
+foldr config                          # show all config file paths and status
+foldr config --edit                   # open config.toml in your editor
 ```
 
 ---
 
-## 4. Ignore Rules
+## Ignore Rules
 
-### Using .foldrignore
+FOLDR has three layers of ignore rules, applied in this order:
 
-Create a `.foldrignore` file in the directory you're organizing:
+### 1. Always-ignored (built-in, cannot be disabled)
 
 ```
-# .foldrignore
+.git/    .svn/    .hg/    __pycache__/    node_modules/
+.venv/   venv/    .DS_Store    Thumbs.db    desktop.ini
+```
 
-node_modules/
-.env
-*.log
+### 2. Global ignore — `~/.foldr/.foldrignore` (default: ON)
+
+This file applies to every `foldr` run automatically. Create it to permanently skip certain file types or names everywhere.
+
+```
+# ~/.foldr/.foldrignore
 *.tmp
-*.cache
+*.bak
+*.log
+desktop.ini
+~$*
+```
+
+The global ignore is **always active by default**. Disable it for one run with `--no-ignore`.
+
+### 3. Local `.foldrignore` — in the target directory
+
+Create a `.foldrignore` in the folder you're organizing:
+
+```
+# .foldrignore in ~/Downloads
+*.log
+tmp/
 build/
-dist/
+secret.txt
+*_backup.*
 ```
 
-Rules:
-- Lines starting with `#` are comments
-- Trailing `/` means directory-only pattern
-- `*` is a wildcard (fnmatch syntax)
-- Patterns match both the bare name and relative path
+### 4. CLI `--ignore` patterns
 
-FOLDR automatically reads this file — no flag required.
-
-### CLI ignore patterns
+Add extra patterns for just one run:
 
 ```bash
-foldr ~/Downloads --ignore "*.log"
-foldr ~/Downloads --ignore "*.log" "*.tmp" "node_modules/"
+foldr ~/Downloads --ignore "*.log" "temp/" "DO_NOT_MOVE*"
 ```
 
-Multiple patterns are accepted. They are merged with `.foldrignore` if it exists.
+### Pattern syntax
 
-### What gets reported
+```
+*.py           match all .py files
+*.log          match all .log files
+tmp/           match a directory named "tmp"
+build/         match a directory named "build"
+secret.txt     exact filename match
+*_backup.*     wildcard on both sides
+```
+
+### Disabling ignores
 
 ```bash
-foldr ~/Downloads --ignore "*.log" --verbose
-```
-
-In verbose mode, ignored files and directories are listed:
-
-```
-IGNORED_FILE  report.log
-IGNORED_DIR   node_modules
+foldr ~/Downloads --no-ignore          # disable ALL rules (built-in exceptions still apply)
+foldr ~/Downloads --show-ignored       # see what was skipped and why
 ```
 
 ---
 
-## 5. Smart MIME Detection
+## Custom Categories
 
-```bash
-foldr ~/Downloads --smart
-```
+FOLDR auto-creates `~/.foldr/config.toml` with commented-out examples on first run.
 
-In addition to extension matching, FOLDR reads each file's actual content (magic bytes) to verify or override the category.
+### Simple examples
 
-Example: a file named `invoice.jpg` that is actually a PDF will be moved to `Documents/` instead of `Images/`.
-
-Requires `python-magic` for the most accurate detection:
-```bash
-pip install python-magic
-```
-
-Falls back to stdlib `mimetypes` (extension-based) if not installed.
-
-Verbose output shows overrides:
-```bash
-foldr ~/Downloads --smart --verbose
-# MIME_OVERRIDE invoice.jpg: Images → Documents
-```
-
----
-
-## 6. Duplicate Detection
-
-### Find and remove duplicates
-
-```bash
-foldr ~/Downloads --deduplicate
-```
-
-Default strategy: keep the **newest** file (by modification time).
-
-### Choose a strategy
-
-```bash
-foldr ~/Downloads --deduplicate keep-newest    # default
-foldr ~/Downloads --deduplicate keep-oldest
-foldr ~/Downloads --deduplicate keep-largest
-```
-
-**How it works:**
-1. Groups files by size (fast pre-filter)
-2. Computes SHA-256 hash for size-collision groups
-3. Files with identical hashes are confirmed duplicates
-4. The chosen strategy determines which copy to keep
-5. FOLDR shows you the plan and asks for confirmation before deleting
-
-### Preview duplicates
-
-```bash
-foldr ~/Downloads --deduplicate --dry-run
-```
-
-Shows the duplicate groups and what would be deleted — nothing is removed.
-
-### Combine with organize
-
-```bash
-foldr ~/Downloads --deduplicate keep-newest --dry-run
-```
-
-Deduplication runs before organization. The deduplicate step and organize step each have their own confirmation.
-
----
-
-## 7. Custom Configuration
-
-### Create a config file
+**Add file extensions to an existing category:**
 
 ```toml
-# foldr.toml
-
-[Datasets]
-extensions = [".csv", ".parquet", ".arrow", ".feather"]
-folder = "Datasets"
-
-[ML_Models]
-extensions = [".pt", ".pth", ".onnx", ".h5", ".pkl"]
-folder = "ML_Models"
-
-[Raw_Photos]
-extensions = [".cr2", ".nef", ".orf", ".arw", ".dng"]
-folder = "Raw_Photos"
-
-[foldr]
-merge = true    # true = add to built-ins (default)
-                # false = replace built-ins entirely
+[Documents]
+extensions = [".pages", ".numbers", ".key"]
 ```
 
-### Use it
+**Create a brand new category:**
+
+```toml
+[RAW Photos]
+folder     = "RAW_Photos"
+extensions = [".raw", ".cr2", ".nef", ".arw", ".dng", ".orf"]
+```
+
+**Rename the folder a category uses:**
+
+```toml
+[Code]
+folder = "Source_Code"
+```
+
+**Replace all built-in categories (use only yours):**
+
+```toml
+[foldr]
+merge = false
+
+[My Documents]
+folder     = "Documents"
+extensions = [".pdf", ".doc", ".docx", ".txt"]
+
+[My Media]
+folder     = "Media"
+extensions = [".jpg", ".png", ".mp4", ".mp3"]
+```
+
+### Edit your config
 
 ```bash
-foldr ~/Downloads --config ~/foldr.toml
-foldr ~/Downloads --config ./foldr.toml --dry-run
+foldr config --edit       # opens in your default editor
 ```
 
-### Global user config (auto-loaded)
+Or just open `~/.foldr/config.toml` in any text editor.
 
-Place a config file at:
+### Test your config
+
+```bash
+foldr ~/Downloads --preview --config ~/.foldr/config.toml
+```
+
+---
+
+## Watch Mode
+
+Watch mode runs FOLDR permanently in the background. Drop a file into the watched directory — it gets organized automatically within 1 second, no prompts.
+
+### Start watching
+
+```bash
+foldr watch ~/Downloads
+```
+
+FOLDR spawns a background process, registers its PID, and returns you to the shell immediately. The watcher keeps running even after you close the terminal.
+
+### Watch subdirectories too
+
+```bash
+foldr watch ~/Downloads --recursive
+```
+
+Files dropped anywhere inside `~/Downloads` (including subdirectories) will be organized.
+
+### Watch runs forever — even after reboot
+
+```bash
+foldr watch ~/Downloads --startup
+```
+
+This registers the watcher with your OS so it starts automatically on login:
+- **Windows**: adds a registry entry under `HKCU\...\Run`
+- **macOS**: creates a LaunchAgent plist in `~/Library/LaunchAgents/`
+- **Linux**: creates a systemd user service in `~/.config/systemd/user/`
+
+### Check active watchers
+
+```bash
+foldr watches
+```
+
+Shows: directory, start time, mode (live/preview), whether recursive, startup registration, files organized, PID.
+
+### Stop watching
+
+```bash
+foldr unwatch ~/Downloads       # stop specific watcher
+foldr unwatch                   # pick from list interactively
+```
+
+### Watch logs
+
+Every file move is logged to: `~/.foldr/watch_logs/<dirname>.log`
+
+View the log:
+```bash
+cat ~/.foldr/watch_logs/Downloads.log    # Linux / macOS
+type %USERPROFILE%\.foldr\watch_logs\Downloads.log    # Windows
+```
+
+### Is watch mode safe?
+
+Yes. It uses the OS-native file event API (no polling, no CPU spinning):
+- **Linux**: inotify — 0% CPU when idle
+- **macOS**: kqueue / FSEvents — 0% CPU when idle
+- **Windows**: ReadDirectoryChangesW — 0% CPU when idle
+
+Memory use: ~15–20 MB per watched directory.
+
+### What watch mode will NOT touch
+
+- Files with in-progress download extensions: `.crdownload` `.part` `.tmp` `.!ut` `.aria2`
+- Files already inside category subfolders
+- Files matching your ignore rules
+
+---
+
+## History & Undo
+
+Every `foldr` operation that moves files is saved as a JSON entry in `~/.foldr/history/`.
+
+### View history
+
+```bash
+foldr history           # last 50 operations
+foldr history --all     # everything
+```
+
+### Undo
+
+```bash
+foldr undo                    # undo the most recent operation
+foldr undo --id a1b2c3        # undo a specific operation (get ID from 'foldr history')
+foldr undo --preview          # see what would be restored without actually restoring
+```
+
+### How undo works (git revert, not git reset)
+
+Each file is tracked individually. Undoing operation #1 does not require undoing operation #2 first. They are independent.
+
+If a file was moved again after the operation you're undoing, FOLDR skips that file and tells you — it never blindly overwrites a later operation's result.
+
+### What cannot be undone
+
+`foldr --dedup` permanently deletes files. FOLDR records what was deleted in history so you can see what happened, but the files are gone. **Always `--preview` before deduping.**
+
+---
+
+## Dedup
+
+Finds files with identical content (by SHA-256 hash) and removes duplicates.
+
+```bash
+# Always preview first — dedup is PERMANENT
+foldr ~/Downloads --dedup keep-newest --preview
+
+# Then execute
+foldr ~/Downloads --dedup keep-newest
+```
+
+**Strategies:**
+- `keep-newest` — keep the most recently modified file, delete older ones
+- `keep-largest` — keep the biggest file (safest: maximises data if one copy is corrupted)
+- `keep-oldest` — keep the original; delete newer copies
+
+---
+
+## Per-OS File Locations
+
+### Linux
+
+| File | Path |
+|------|------|
+| Config directory | `~/.foldr/` |
+| Category config | `~/.foldr/config.toml` |
+| Global ignore | `~/.foldr/.foldrignore` |
+| History | `~/.foldr/history/` |
+| Watch logs | `~/.foldr/watch_logs/` |
+| Active watchers | `~/.foldr/watches.json` |
+| Startup service | `~/.config/systemd/user/foldr-watch-<name>.service` |
+
+### macOS
+
+| File | Path |
+|------|------|
+| Config directory | `~/.foldr/` |
+| Category config | `~/.foldr/config.toml` |
+| Global ignore | `~/.foldr/.foldrignore` |
+| History | `~/.foldr/history/` |
+| Watch logs | `~/.foldr/watch_logs/` |
+| Active watchers | `~/.foldr/watches.json` |
+| Startup agent | `~/Library/LaunchAgents/com.foldr-watch-<name>.plist` |
+
+### Windows
+
+| File | Path |
+|------|------|
+| Config directory | `C:\Users\<you>\.foldr\` |
+| Category config | `C:\Users\<you>\.foldr\config.toml` |
+| Global ignore | `C:\Users\<you>\.foldr\.foldrignore` |
+| History | `C:\Users\<you>\.foldr\history\` |
+| Watch logs | `C:\Users\<you>\.foldr\watch_logs\` |
+| Active watchers | `C:\Users\<you>\.foldr\watches.json` |
+| Startup entry | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\foldr-watch-<name>` |
+
+---
+
+## Config File Locations
+
+### `config.toml` — category configuration
+
+FOLDR auto-creates this on first run with commented-out examples.
 
 | OS | Path |
 |----|------|
-| Linux / macOS | `~/.config/foldr/config.toml` |
-| Windows | `%USERPROFILE%\.foldr\config.toml` |
+| All | `~/.foldr/config.toml` |
 
-FOLDR loads this automatically on every run — no `--config` flag needed.
+Edit with: `foldr config --edit`
 
-The `--config` flag overrides the global config.
+### `.foldrignore` — global ignore rules
+
+Create this file manually to permanently skip file types everywhere.
+
+| OS | Path |
+|----|------|
+| All | `~/.foldr/.foldrignore` |
 
 ---
 
-## 8. Watch Mode (Auto-Organizer)
+## Windows-Specific Notes
 
-```bash
-foldr watch ~/Downloads
+### Paths with spaces
+
+Always wrap Windows paths in quotes:
+
+```powershell
+foldr "D:\My Downloads"
+foldr "D:\My Downloads" --preview
+foldr watch "D:\My Documents"
 ```
 
-FOLDR monitors the directory and automatically organizes any new file that appears. Runs continuously until `Ctrl+C`.
+### Colours in the terminal
 
-### How it works
+FOLDR automatically enables ANSI colour support in:
+- **Windows Terminal** — full colour, works perfectly
+- **PowerShell** — full colour on Windows 10+
+- **cmd.exe** — full colour on Windows 10 build 14931+
+- **Older Windows** — graceful plain-text fallback
 
-- Uses OS-native filesystem events (via watchdog)
-- Waits 350ms after file creation (for download completion)
-- Skips in-progress files (`.crdownload`, `.part`, `.tmp`)
-- Skips files already inside FOLDR category folders (no double-moves)
-- Prints a timestamped log of every file it processes
+### Watch mode and console windows
 
-### Preview mode
+When you run `foldr watch`, FOLDR uses `pythonw.exe` (the windowless Python interpreter) to spawn the background daemon so no console window appears.
 
-```bash
-foldr watch ~/Downloads --dry-run
+### Startup on login
+
+```powershell
+foldr watch "D:\Downloads" --startup
 ```
 
-Shows what would happen for each new file without actually moving anything.
+This adds a registry entry:  
+`HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`
 
-### With custom config
-
-```bash
-foldr watch ~/Downloads --config ~/foldr.toml
-foldr watch ~/Downloads --ignore "*.tmp"
-```
-
-### Example output
-
-```
-  Watching  /home/UserX/Downloads
-  Mode  LIVE
-
-  Press Ctrl+C to stop.
-
-  15:42:03  invoice.pdf  ↓ detected
-      → invoice.pdf  →  Documents/
-
-  15:43:17  recording.mp3  ↓ detected
-      → recording.mp3  →  Audio/
+To remove it:
+```powershell
+foldr unwatch "D:\Downloads"
 ```
 
 ---
 
-## 9. Undo System
+## macOS-Specific Notes
 
-### Undo the last operation
-
-```bash
-foldr undo
-```
-
-Shows the operation details (ID, directory, timestamp, file count), previews the first 10 file restores, then asks for `y/n` confirmation.
-
-Files are restored to their **original locations**. If a file already exists there, it's renamed with a `_restored(N)` suffix.
-
-### Preview undo without moving anything
+### Installation
 
 ```bash
-foldr undo --dry-run
+pip install foldr
+# For --smart mode:
+brew install libmagic
+pip install "foldr[all]"
 ```
 
-Shows exactly what would be restored. No files are moved.
-
-### Undo a specific past operation
+### Startup on login
 
 ```bash
-foldr undo --id a1b2c3
+foldr watch ~/Downloads --startup
 ```
 
-The ID is the 6-character code shown in `foldr history`.
+Creates a LaunchAgent plist: `~/Library/LaunchAgents/com.foldr-watch-downloads.plist`
 
-### After undo
+To remove: `foldr unwatch ~/Downloads`
 
-The history entry is archived (renamed `.undone`) — never deleted. The audit trail is always preserved.
+### Spaces in paths
 
----
-
-## 10. History
-
-### View recent operations
+macOS paths with spaces work fine in Terminal:
 
 ```bash
-foldr history
-```
-
-Output is styled like `git log --oneline`:
-
-```
- a1b2c3  07 Mar 15:20   21 files  → Documents
- d4e5f6  06 Mar 11:45    8 files  → Downloads
-```
-
-Each line shows:
-- **ID** — 6-char hex, use with `foldr undo --id`
-- **Timestamp** — day, month, time
-- **File count**
-- **Directory name**
-
-### Show undone operations too
-
-```bash
-foldr history --all
-```
-
-Undone entries are shown with strikethrough and `(undone)` label.
-
-### History storage
-
-History lives at `~/.foldr/history/`. Each operation creates a JSON file:
-
-```
-~/.foldr/history/
-  2026-03-07_15-20-33_a1b2c3.json       ← active
-  2026-03-06_11-45-01_d4e5f6.undone     ← archived after undo
+foldr ~/Desktop/My\ Downloads
+# or:
+foldr "~/Desktop/My Downloads"
 ```
 
 ---
 
-## 11. Verbosity Control
+## Linux-Specific Notes
 
-### Verbose — see everything
-
-```bash
-foldr ~/Downloads --verbose
-```
-
-Shows:
-- All normal actions
-- Files ignored by `.foldrignore` / `--ignore`
-- Unmatched files (no category)
-- MIME overrides (from `--smart`)
-
-### Quiet — minimal output
+### Installation
 
 ```bash
-foldr ~/Downloads --quiet
+pip install foldr
+# For --smart mode:
+sudo apt install libmagic1      # Debian/Ubuntu
+sudo dnf install file-libs      # Fedora/RHEL
+sudo pacman -S file             # Arch
+pip install "foldr[all]"
 ```
 
-Suppresses the action list. Only prints the final one-liner:
+### Startup with systemd (recommended)
 
-```
-✓ Moved 21 · Unmatched 2 · 0.14s
+```bash
+foldr watch ~/Downloads --startup
 ```
 
-Useful for scripting or cron jobs.
+Creates: `~/.config/systemd/user/foldr-watch-downloads.service`
+
+Manage it:
+```bash
+systemctl --user status foldr-watch-downloads
+systemctl --user stop foldr-watch-downloads
+systemctl --user disable foldr-watch-downloads
+```
+
+### Config file in XDG locations
+
+FOLDR primarily uses `~/.foldr/config.toml`. It also checks `~/.config/foldr/config.toml` as a fallback for XDG-compliant setups.
 
 ---
 
-## 12. Structured Operation Logs
+## Default Categories
 
-Every real (non-dry-run) operation writes two files:
+| Category | Folder | Common Extensions |
+|----------|--------|-------------------|
+| Documents | Documents/ | .pdf .doc .docx .odt .rtf .tex .md .pages |
+| Images | Images/ | .png .jpg .jpeg .gif .bmp .tiff .webp .heic .raw |
+| Videos | Videos/ | .mp4 .mkv .mov .avi .wmv .flv .webm |
+| Audio | Audio/ | .mp3 .wav .aac .flac .ogg .m4a .wma |
+| Archives | Archives/ | .zip .rar .7z .tar .gz .bz2 .xz |
+| Code | Code/ | .py .js .ts .html .css .java .cpp .c .rs .go |
+| Scripts | Scripts/ | .sh .bash .zsh .fish .ps1 .bat .cmd |
+| Spreadsheets | Spreadsheets/ | .xlsx .xls .csv .ods |
+| Presentations | Presentations/ | .pptx .ppt .odp |
+| Databases | Databases/ | .db .sqlite .sqlite3 |
+| Executables | Executables/ | .exe .msi .deb .rpm .apk .dmg |
+| Fonts | Fonts/ | .ttf .otf .woff .woff2 |
+| Ebooks | Ebooks/ | .epub .mobi .azw |
+| Text & Data | Text_Data/ | .txt .json .xml .yaml .toml .log |
+| Notebooks | Notebooks/ | .ipynb |
+| Machine_Learning | Machine_Learning/ | .pkl .h5 .onnx .pt .pth |
 
-**History log** (`~/.foldr/history/*.json`) — used by `undo` and `history`:
-```json
-{
-  "id": "a1b2c3",
-  "timestamp": "2026-03-07T15:20:33Z",
-  "base": "/home/UserX/Downloads",
-  "total_files": 21,
-  "records": [...]
-}
-```
-
-**Operation log** (`~/.foldr/logs/*.json`) — full observability record:
-```json
-{
-  "operation_id": "a1b2c3",
-  "base": "/home/UserX/Downloads",
-  "dry_run": false,
-  "recursive": true,
-  "files_moved": [...],
-  "files_ignored": 3,
-  "mime_overrides": 1,
-  "duration_seconds": 0.143,
-  "summary": { "Documents": 16, "Code": 3, "Videos": 1 }
-}
-```
+Files with unrecognised extensions are **never moved** — they stay in place.
 
 ---
 
-## 13. Flag Reference
+## Troubleshooting
 
-```
-foldr [path] [options]
+**"Not a valid directory" / path error on Windows**  
+Wrap the path in quotes: `foldr "D:\My Downloads"`
 
-Positional:
-  path                Directory to organize, or: watch | undo | history
-
-Core:
-  --dry-run           Preview only, no files moved
-  --interactive, -i   TUI preview → confirm before executing
-
-Recursive Engine:
-  --recursive         Descend into subdirectories
-  --max-depth N       Limit recursion depth (requires --recursive)
-  --follow-symlinks   Follow symlinked directories (default: off)
-
-Ignore Rules:
-  --ignore PATTERN    Skip matching files/dirs (repeatable)
-                      e.g. --ignore "*.log" "node_modules/"
-
-Configuration:
-  --config FILE       Path to foldr.toml
-
-Intelligent Detection:
-  --smart             MIME-type content detection (needs python-magic)
-  --deduplicate [STRATEGY]
-                      Find/remove duplicates
-                      Strategies: keep-newest | keep-largest | keep-oldest
-
-Output:
-  --verbose, -v       Show every file decision
-  --quiet, -q         Suppress action list, final counts only
-
-Undo / History:
-  --id ID             Operation ID for: foldr undo --id <ID>
-  --all               Include undone ops: foldr history --all
-```
-
----
-
-## 14. Example Workflows
-
-### Daily Downloads cleanup
+**config.toml error on startup**  
+Open `~/.foldr/config.toml` and check for TOML syntax errors. The error message tells you the exact line. Or delete the file and let FOLDR regenerate it:
 
 ```bash
-# Preview first
-foldr ~/Downloads --dry-run
-
-# Run it
-foldr ~/Downloads
+del %USERPROFILE%\.foldr\config.toml   # Windows
+rm ~/.foldr/config.toml                 # Linux / macOS
+foldr                                   # re-generates automatically
 ```
 
-### Deep project folder cleanup
+**Watch mode not picking up new files**  
+Check the log: `~/.foldr/watch_logs/<dirname>.log`  
+Check the watcher is alive: `foldr watches`
 
-```bash
-# Preview recursive cleanup, 3 levels deep
-foldr ~/projects/old-repo --recursive --max-depth 3 --dry-run
+**`--dedup` didn't delete anything**  
+Check you used `--preview` — in preview mode nothing is deleted. Run without `--preview` to execute.
 
-# Run interactively
-foldr ~/projects/old-repo --recursive --max-depth 3 --interactive
-```
-
-### Downloads auto-organizer (background)
-
-```bash
-# Start the watcher
-foldr watch ~/Downloads
-
-# Or as a nohup background process
-nohup foldr watch ~/Downloads &
-```
-
-### Research data with custom categories
-
-```toml
-# ~/research.toml
-[Datasets]
-extensions = [".csv", ".parquet", ".json", ".jsonl"]
-
-[Models]
-extensions = [".pt", ".pth", ".onnx", ".pkl", ".joblib"]
-
-[Papers]
-extensions = [".pdf"]
-folder = "Papers"
-
-[foldr]
-merge = false   # only use these categories
-```
-
-```bash
-foldr ~/research --config ~/research.toml --recursive --dry-run
-```
-
-### Clean up and deduplicate at once
-
-```bash
-foldr ~/Downloads --deduplicate keep-newest --recursive --dry-run
-# Review output
-foldr ~/Downloads --deduplicate keep-newest --recursive
-```
-
-### Oops — undo it
-
-```bash
-# See what happened
-foldr history
-
-# Undo the last one
-foldr undo
-
-# Or undo a specific operation
-foldr undo --id a1b2c3
-```
-
----
-
-## 15. Safety Guarantees
-
-1. **Existing folders are never moved** — FOLDR only moves files. Directories already in the target are counted as "skipped directories" and left alone.
-2. **Recursive mode always asks for confirmation** — unless `--dry-run` or `--interactive`.
-3. **No infinite loops** — FOLDR's output folders are tracked and never re-entered during recursive walks.
-4. **Symlink protection** — symlinked directories are skipped by default; circular symlinks are detected even when `--follow-symlinks` is used.
-5. **Name conflict resolution** — if a destination file already exists, the source is renamed `filename(1).ext`, `filename(2).ext`, etc.
-6. **Full undo** — every real run is logged. `foldr undo` restores all files.
-7. **Permission errors** — restricted directories are silently skipped, not crashed on.
-
----
-
-## 16. Built-in Categories
-
-FOLDR ships with 30+ built-in categories. A selection:
-
-| Category | Extensions |
-|----------|-----------|
-| Documents | `.pdf` `.docx` `.odt` `.tex` `.md` |
-| Images | `.png` `.jpg` `.gif` `.webp` `.heic` `.raw` |
-| Videos | `.mp4` `.mkv` `.mov` `.avi` `.webm` |
-| Audio | `.mp3` `.wav` `.flac` `.aac` `.ogg` |
-| Code | `.py` `.js` `.ts` `.go` `.rs` `.cpp` `.java` … |
-| Spreadsheets | `.xlsx` `.csv` `.ods` |
-| Archives | `.zip` `.tar.gz` `.7z` `.rar` |
-| Machine Learning | `.pt` `.onnx` `.h5` `.pkl` `.npz` |
-| Ebooks | `.epub` `.mobi` `.azw3` |
-| Databases | `.sqlite` `.db` `.sql` |
-| Fonts | `.ttf` `.otf` `.woff2` |
-| 3D Models | `.stl` `.obj` `.fbx` `.blend` |
-| GIS | `.geojson` `.kml` `.shp` |
-
-Full list: see `foldr/config.py` in the package.
-
----
-
-## 17. Project Layout
-
-```
-foldr/
-├── __init__.py          public API
-├── config.py            built-in category/extension map
-├── config_loader.py     TOML config loading + merge
-├── organizer.py         core engine (move files, recursive walk)
-├── cli.py               all commands + Rich UI
-├── watch.py             watch mode (watchdog integration)
-├── history.py           operation log + undo
-├── logger.py            structured JSON operation logs
-├── models.py            shared dataclasses
-├── dedup.py             SHA-256 duplicate detection
-├── empty_dirs.py        empty directory scanner/remover
-├── ignore.py            .foldrignore + --ignore pattern matching
-└── mime_detect.py       MIME-type detection (python-magic / mimetypes)
-```
-
----
-
-*FOLDR is MIT licensed. Source: https://github.com/qasimio/Foldr*
+**`foldr undo` says "already restored"**  
+The file was moved again after the operation you're undoing. Check `foldr history` to find the more recent operation and undo that one instead.
