@@ -138,12 +138,27 @@ def _organize_one(
 
     tmpl = template or CATEGORIES_TEMPLATE
 
-    # Guard: file must still exist and be directly inside base
+    # Guard: file must still exist
     if not file_path.exists() or not file_path.is_file():
         return None
+    # If not recursive, only handle files directly in base
+    # If recursive, allow files in subdirs (but not already-organized category dirs)
     try:
-        if file_path.parent.resolve() != base.resolve():
-            return None  # already in a category subfolder
+        file_parent = file_path.parent.resolve()
+        base_res    = base.resolve()
+        if file_parent != base_res:
+            # Check it's not already in a category folder created by foldr
+            try:
+                rel_parts = file_parent.relative_to(base_res).parts
+                if len(rel_parts) == 1:
+                    # Direct child of base — could be category folder; skip to avoid loops
+                    # unless the folder name is not a known category destination
+                    from foldr.config import CATEGORIES_TEMPLATE as _CT
+                    known_folders = {v["folder"] for v in _CT.values()}
+                    if rel_parts[0] in known_folders:
+                        return None  # already organized
+            except ValueError:
+                return None  # outside base entirely
     except OSError:
         return None
 
@@ -189,6 +204,7 @@ def run_watch(
     base: Path,
     template: dict | None = None,
     dry_run: bool = False,
+    recursive: bool = False,
     extra_ignore: list[str] | None = None,
     daemon_mode: bool = False,
 ) -> None:
@@ -200,6 +216,7 @@ def run_watch(
     base          : directory to watch
     template      : category template (or None to use built-in defaults)
     dry_run       : log moves but don't actually move files
+    recursive     : also watch subdirectory events (use watchdog recursive=True)
     extra_ignore  : additional ignore patterns from --ignore flag
     daemon_mode   : when True, use file-only logging and update watches.json
     """
@@ -243,8 +260,24 @@ def run_watch(
                 return
             p = _normalize_path(getattr(event, "src_path", ""))
             try:
-                if p.parent.resolve() != base.resolve():
+                resolved_parent = p.parent.resolve()
+                base_resolved = base.resolve()
+                # In non-recursive mode: only handle files directly in base
+                if not recursive and resolved_parent != base_resolved:
                     return
+                # In recursive mode: skip if inside a FOLDR category folder
+                if recursive:
+                    try:
+                        rel = resolved_parent.relative_to(base_resolved)
+                        # Skip if already in a category subfolder at depth 1
+                        # (prevents re-organizing already-organized files)
+                        parts = rel.parts
+                        if len(parts) == 1:
+                            # Direct child dir — could be category folder
+                            # We allow it; organizer will sort it correctly
+                            pass
+                    except ValueError:
+                        return
             except OSError:
                 return
             if p.suffix.lower() in _IN_PROGRESS:
@@ -313,7 +346,7 @@ def run_watch(
     processor.start()
 
     observer = Observer()
-    observer.schedule(_Handler(), str(base), recursive=False)
+    observer.schedule(_Handler(), str(base), recursive=recursive)
     observer.start()
 
     if daemon_mode:
