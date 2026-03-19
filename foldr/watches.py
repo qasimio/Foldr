@@ -3,6 +3,15 @@ foldr.watches
 ~~~~~~~~~~~~~
 Persistent watch registry for FOLDR v2.1.
 
+How startup-on-reboot works
+----------------------------
+The startup entry stores the ABSOLUTE PATH to the Python interpreter
+(sys.executable resolved). After reboot, the venv is not activated,
+but the absolute path still works because it's a real filesystem path.
+
+The daemon re-registers its new PID in watches.json when it starts,
+so `foldr watches` shows accurate info even after a reboot.
+
 Pylance / cross-platform note
 ------------------------------
 All winreg accesses use  # type: ignore[attr-defined]  so Pylance on
@@ -85,6 +94,8 @@ def add_watch(
     pid: int,
     dry_run: bool = False,
     recursive: bool = False,
+    config: str | None = None,
+    no_ignore: bool = False,
 ) -> None:
     data = _load()
     data[str(path.resolve())] = {
@@ -92,6 +103,8 @@ def add_watch(
         "started":   datetime.now(timezone.utc).isoformat(),
         "dry_run":   dry_run,
         "recursive": recursive,
+        "config":    config,
+        "no_ignore": no_ignore,
         "total":     0,
     }
     _save(data)
@@ -120,7 +133,8 @@ def increment_count(path: Path, n: int = 1) -> None:
 def _get_python() -> str:
     """
     Return the absolute path to the current Python interpreter.
-    Uses sys.executable resolved to an absolute path.
+    Uses sys.executable resolved to an absolute path so startup entries
+    (systemd / LaunchAgent / Registry) work after reboot without venv.
     On Windows, prefers pythonw.exe (no console popup).
     """
     exe = Path(sys.executable).resolve()
@@ -134,48 +148,100 @@ def _get_python() -> str:
 
 # ── Daemon spawn ───────────────────────────────────────────────────────────────
 
+def _project_root() -> str:
+    """
+    Return the directory that CONTAINS the foldr/ package folder.
+
+    Works for:
+    - pip install foldr      → site-packages dir (foldr is on sys.path already)
+    - pip install -e .       → the source checkout root
+    - python -m foldr.cli    → whatever directory has foldr/ as a child
+
+    This path is passed as cwd AND prepended to PYTHONPATH when spawning
+    the daemon subprocess, so the daemon can always import foldr.
+    """
+    try:
+        # __file__ of this module = <root>/foldr/watches.py
+        # .parent = <root>/foldr/
+        # .parent.parent = <root>/   <- the directory that has foldr/ in it
+        return str(Path(__file__).resolve().parent.parent)
+    except Exception:
+        return os.getcwd()
+
+
 def spawn_daemon(
     target: Path,
     dry_run: bool = False,
     recursive: bool = False,
     extra_ignore: list[str] | None = None,
+    config: str | None = None,
+    no_ignore: bool = False,
 ) -> int:
     """
     Spawn a detached background daemon. Returns its PID.
-    Windows: pythonw.exe + DETACHED_PROCESS | CREATE_NO_WINDOW (no popup).
-    Unix:    start_new_session=True (setsid equivalent).
+
+    Cross-platform:
+      Windows : pythonw.exe + DETACHED_PROCESS | CREATE_NO_WINDOW (no console popup)
+      Linux   : start_new_session=True  +  cwd set to project root
+      macOS   : same as Linux
+
+    Linux note: the daemon subprocess must be able to import foldr. We pass
+    the project root as cwd AND prepend it to PYTHONPATH so that
+    `python -m foldr.cli` works whether foldr is pip-installed or just a folder.
     """
     python = _get_python()
-    cmd    = [python, "-m", "foldr.cli",
-              "_watch-daemon", str(target.resolve())]
+    root   = _project_root()
+
+    cmd = [python, "-m", "foldr.cli", "_watch-daemon", str(target.resolve())]
     if dry_run:
         cmd.append("--preview")
     if recursive:
         cmd.append("--recursive")
+    if config:
+        cmd += ["--config", str(Path(config).expanduser().resolve())]
+    if no_ignore:
+        cmd.append("--no-ignore")
     if extra_ignore:
         cmd += ["--ignore"] + extra_ignore
 
-    if _IS_WIN:
-        DETACHED    = 0x00000008
-        NO_WINDOW   = 0x08000000
-        NEW_GROUP   = 0x00000200
-        proc = subprocess.Popen(
-            cmd,
-            creationflags=DETACHED | NO_WINDOW | NEW_GROUP,
-            close_fds=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    else:
-        proc = subprocess.Popen(
-            cmd,
-            start_new_session=True,
-            close_fds=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+    # Build environment: prepend project root to PYTHONPATH
+    env = os.environ.copy()
+    sep = ";" if _IS_WIN else ":"
+    old_pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = root + (sep + old_pp if old_pp else "")
+
+    # Redirect daemon output to log file so errors are visible
+    _LOG_DIR = Path.home() / ".foldr" / "watch_logs"
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    safe     = target.name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+    log_file = _LOG_DIR / f"{safe}.log"
+
+    with open(log_file, "a", encoding="utf-8") as lf:
+        if _IS_WIN:
+            DETACHED    = 0x00000008
+            NO_WINDOW   = 0x08000000
+            NEW_GROUP   = 0x00000200
+            proc = subprocess.Popen(
+                cmd,
+                creationflags=DETACHED | NO_WINDOW | NEW_GROUP,
+                close_fds=True,
+                cwd=root,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=lf,
+                stderr=lf,
+            )
+        else:
+            proc = subprocess.Popen(
+                cmd,
+                start_new_session=True,
+                close_fds=True,
+                cwd=root,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=lf,
+                stderr=lf,
+            )
     return proc.pid
 
 
