@@ -326,6 +326,28 @@ def cmd_watch(raw: list[str], args: argparse.Namespace) -> None:
     startup   = getattr(args, "startup", False)
     tmpl      = _load_tmpl(args.config)
 
+    # ── User approval ──────────────────────────────────────────────────────────
+    # Show what watch mode will do and ask for confirmation.
+    mode_label = "preview (log only — no files moved)" if args.preview else "live (files will be moved)"
+    print()
+    _box(
+        f"  Directory:  {_c(ACCENT+BOLD)}{target}{_c(RESET)}\n"
+        f"  Mode:       {_c(FG_DIM)}{mode_label}{_c(RESET)}\n"
+        f"  Recursive:  {_c(FG_DIM)}{'yes — subdirectories included' if recursive else 'no — root only'}{_c(RESET)}\n"
+        f"  Startup:    {_c(FG_DIM)}{'yes — starts on login/reboot (--startup)' if startup else 'no'}{_c(RESET)}\n"
+        f"\n"
+        f"  {_c(FG_MUTED)}Watch mode will:{_c(RESET)}\n"
+        f"  {_c(FG_MUTED)}  1. Organize all existing files in the directory immediately.{_c(RESET)}\n"
+        f"  {_c(FG_MUTED)}  2. Keep watching and organize any new or moved files automatically.{_c(RESET)}\n"
+        f"  {_c(FG_MUTED)}  3. Files moved back to the root folder will be re-organized.{_c(RESET)}\n"
+        f"  {_c(FG_MUTED)}  No approval is asked per file — you are approving now.{_c(RESET)}",
+        title=" Watch Mode ",
+        col=COL_WARN,
+    )
+    if not _confirm("Start watch mode for this directory?", default=True):
+        _dim("Cancelled.")
+        return
+
     pid = spawn_daemon(target, dry_run=args.preview,
                        recursive=recursive, extra_ignore=ignore)
     add_watch(target, pid, dry_run=args.preview,
@@ -335,7 +357,8 @@ def cmd_watch(raw: list[str], args: argparse.Namespace) -> None:
     _dim(f"PID:       {pid}")
     _dim(f"Mode:      {'preview (no moves)' if args.preview else 'live'}")
     _dim(f"Recursive: {'yes' if recursive else 'no'}")
-    _dim(f"Log:       {Path.home()/'.foldr'/'watch_logs'/(target.name+'.log')}")
+    log_file = Path.home() / ".foldr" / "watch_logs" / (target.name + ".log")
+    _dim(f"Log:       {log_file}  (check here if nothing is organizing)")
     _dim(f"Stop:      foldr unwatch \"{target}\"")
     _dim(f"Status:    foldr watches")
 

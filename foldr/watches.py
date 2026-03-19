@@ -167,27 +167,34 @@ def spawn_daemon(
     if extra_ignore:
         cmd += ["--ignore"] + extra_ignore
 
-    if _IS_WIN:
-        DETACHED    = 0x00000008
-        NO_WINDOW   = 0x08000000
-        NEW_GROUP   = 0x00000200
-        proc = subprocess.Popen(
-            cmd,
-            creationflags=DETACHED | NO_WINDOW | NEW_GROUP,
-            close_fds=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    else:
-        proc = subprocess.Popen(
-            cmd,
-            start_new_session=True,
-            close_fds=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+    # Redirect daemon output to the log file so crashes are visible
+    log_dir  = Path.home() / ".foldr" / "watch_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    safe     = target.name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+    log_file = log_dir / f"{safe}.log"
+
+    with open(log_file, "a", encoding="utf-8") as lf:
+        if _IS_WIN:
+            DETACHED    = 0x00000008
+            NO_WINDOW   = 0x08000000
+            NEW_GROUP   = 0x00000200
+            proc = subprocess.Popen(
+                cmd,
+                creationflags=DETACHED | NO_WINDOW | NEW_GROUP,
+                close_fds=True,
+                stdin=subprocess.DEVNULL,
+                stdout=lf,
+                stderr=lf,
+            )
+        else:
+            proc = subprocess.Popen(
+                cmd,
+                start_new_session=True,
+                close_fds=True,
+                stdin=subprocess.DEVNULL,
+                stdout=lf,
+                stderr=lf,
+            )
     return proc.pid
 
 
