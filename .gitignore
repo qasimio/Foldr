@@ -55,3 +55,51 @@ __pycache__/
 # Ignored lock files (optional, your preference)
 poetry.lock
 pipfile.lock
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.env
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+
+# Distribution
+*.tar.gz
+*.whl
+MANIFEST
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# FOLDR runtime data (user-specific, not tracked)
+.foldr/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Mypy / type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
+# Jupyter
+.ipynb_checkpoints/

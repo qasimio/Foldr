@@ -20,7 +20,6 @@ Commands
 
   foldr watch <path>                     start background auto-organizer
   foldr watch <path> --recursive         watch subdirectories too
-  foldr watch <path> --startup           also start on login / reboot
   foldr unwatch <path>                   stop a watcher
   foldr watches                          list all active watchers
 
@@ -255,8 +254,7 @@ def _build_parser() -> argparse.ArgumentParser:
             '  foldr ~/Downloads --preview\n'
             '  foldr ~/Downloads --recursive --depth 2\n'
             '  foldr ~/Downloads --dedup keep-newest --preview\n'
-            '  foldr watch ~/Downloads --startup\n'
-            '  foldr undo\n'
+                      '  foldr undo\n'
             '  foldr history\n'
         ),
     )
@@ -287,8 +285,6 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Print every file moved")
     p.add_argument("--quiet",         action="store_true",
                    help="Suppress all output (for scripts)")
-    p.add_argument("--startup",       action="store_true",
-                   help="(watch) also register to start on login/reboot")
     p.add_argument("--id",            metavar="ID",
                    help="History operation ID (for: foldr undo --id <ID>)")
     p.add_argument("--all",           action="store_true",
@@ -315,7 +311,7 @@ def cmd_watch(raw: list[str], args: argparse.Namespace) -> None:
         _dim('Tip: if path has spaces, use quotes:  foldr watch "My Downloads"')
         sys.exit(1)
 
-    from foldr.watches import add_watch, get_watches, spawn_daemon, register_startup
+    from foldr.watches import add_watch, get_watches, spawn_daemon
     if str(target.resolve()) in get_watches():
         _warn(f"Already watching: {target}")
         _dim("Run 'foldr unwatch <path>' to stop it first.")
@@ -323,50 +319,22 @@ def cmd_watch(raw: list[str], args: argparse.Namespace) -> None:
 
     ignore    = _build_ignore(args)
     recursive = args.recursive
-    startup   = getattr(args, "startup", False)
     tmpl      = _load_tmpl(args.config)
-
-    # ── User approval ──────────────────────────────────────────────────────────
-    # Show what watch mode will do and ask for confirmation.
-    mode_label = "preview (log only — no files moved)" if args.preview else "live (files will be moved)"
-    print()
-    _box(
-        f"  Directory:  {_c(ACCENT+BOLD)}{target}{_c(RESET)}\n"
-        f"  Mode:       {_c(FG_DIM)}{mode_label}{_c(RESET)}\n"
-        f"  Recursive:  {_c(FG_DIM)}{'yes — subdirectories included' if recursive else 'no — root only'}{_c(RESET)}\n"
-        f"  Startup:    {_c(FG_DIM)}{'yes — starts on login/reboot (--startup)' if startup else 'no'}{_c(RESET)}\n"
-        f"\n"
-        f"  {_c(FG_MUTED)}Watch mode will:{_c(RESET)}\n"
-        f"  {_c(FG_MUTED)}  1. Organize all existing files in the directory immediately.{_c(RESET)}\n"
-        f"  {_c(FG_MUTED)}  2. Keep watching and organize any new or moved files automatically.{_c(RESET)}\n"
-        f"  {_c(FG_MUTED)}  3. Files moved back to the root folder will be re-organized.{_c(RESET)}\n"
-        f"  {_c(FG_MUTED)}  No approval is asked per file — you are approving now.{_c(RESET)}",
-        title=" Watch Mode ",
-        col=COL_WARN,
-    )
-    if not _confirm("Start watch mode for this directory?", default=True):
-        _dim("Cancelled.")
-        return
 
     pid = spawn_daemon(target, dry_run=args.preview,
                        recursive=recursive, extra_ignore=ignore)
     add_watch(target, pid, dry_run=args.preview,
-              recursive=recursive, startup=startup)
+              recursive=recursive)
 
     _info(f"Watcher started for: {_c(ACCENT+BOLD)}{target}{_c(RESET)}")
     _dim(f"PID:       {pid}")
     _dim(f"Mode:      {'preview (no moves)' if args.preview else 'live'}")
     _dim(f"Recursive: {'yes' if recursive else 'no'}")
-    log_file = Path.home() / ".foldr" / "watch_logs" / (target.name + ".log")
-    _dim(f"Log:       {log_file}  (check here if nothing is organizing)")
+    _dim(f"Log:       {Path.home()/'.foldr'/'watch_logs'/(target.name+'.log')}")
     _dim(f"Stop:      foldr unwatch \"{target}\"")
     _dim(f"Status:    foldr watches")
 
-    if startup:
-        ok, msg = register_startup(target, recursive=recursive)
-        (_ok if ok else _warn)(msg)
-    else:
-        _dim("Tip: add --startup to also start on login/reboot")
+
 
 
 def cmd_unwatch(raw: list[str]) -> None:
@@ -400,10 +368,9 @@ def cmd_unwatch(raw: list[str]) -> None:
             _dim("Cancelled."); return
 
     target = Path(ts).resolve()
-    from foldr.watches import kill_watch, unregister_startup
+    from foldr.watches import kill_watch
     ok, msg = kill_watch(target)
     (_ok if ok else _warn)(msg)
-    unregister_startup(target)
 
 
 def cmd_watches() -> None:
@@ -423,11 +390,10 @@ def cmd_watches() -> None:
             started   = info.get("started","")[:16].replace("T"," ")
             mode      = "preview" if info.get("dry_run") else "live"
             recursive = "yes" if info.get("recursive") else "no"
-            startup   = "yes" if info.get("startup")   else "no"
             total     = info.get("total",0)
-            rows.append([Path(p).name, started, mode, recursive, startup,
+            rows.append([Path(p).name, started, mode, recursive,
                          f"{total} files", str(info.get("pid","?"))])
-        print(tabulate(rows, headers=["Directory","Started","Mode","Recursive","Startup","Organized","PID"],
+        print(tabulate(rows, headers=["Directory","Started","Mode","Recursive","Organized","PID"],
                        tablefmt="rounded_outline"))
     except ImportError:
         for p,info in watches.items():

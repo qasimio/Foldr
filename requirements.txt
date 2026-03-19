@@ -1,50 +1,28 @@
-# FOLDR v2.1 — requirements.txt
-# ─────────────────────────────────────────────────────────────────────────────
-# Install everything with one command:
-#   pip install -r requirements.txt
+# FOLDR v2.1
+# pip install -r requirements.txt
 #
-# Works on Linux, macOS, and Windows without any extras or choices.
-# ─────────────────────────────────────────────────────────────────────────────
+# This installs everything FOLDR needs on any OS.
+# No extras, no choices — one command and you're done.
 
-
-# ── Core (required on all platforms) ─────────────────────────────────────────
+# ── Required on all platforms ─────────────────────────────────────────────────
 
 # File system event watching — used by `foldr watch`
-# OS-native backends, zero CPU when idle:
+# OS-native, zero CPU when idle:
 #   Linux   → inotify
 #   macOS   → FSEvents / kqueue
 #   Windows → ReadDirectoryChangesW
 watchdog>=4.0.0
 
-# Table formatting for history / dedup / watches output
-# FOLDR falls back to plain text if missing, but tables look better with it
+# Table formatting for history / watches / dedup output
+# Graceful plain-text fallback if missing, but tables look much better with it
 tabulate>=0.9.0
 
-# TOML config file support for Python 3.10
-# Python 3.11+ has tomllib built-in — tomli is skipped automatically
+# TOML config support for Python 3.10
+# Python 3.11+ includes tomllib in the standard library — tomli is skipped automatically
 tomli>=2.0.1 ; python_version < "3.11"
 
+# ── Windows only ──────────────────────────────────────────────────────────────
 
-# ── Windows only (installed automatically by pip on Windows) ──────────────────
-
-# ANSI colour support in cmd.exe and older PowerShell
-# Win10 build 14931+ is auto-enabled via ctypes — colorama is a safety net
+# ANSI colour in cmd.exe and older PowerShell
+# Windows 10 build 14931+ is auto-enabled via ctypes — colorama is a safety net
 colorama>=0.4.6 ; sys_platform == "win32"
-
-
-# ── Optional: --smart mode (detect files by content, not just extension) ──────
-# Also needs a system library — install ONE of:
-#
-#   Linux:
-#     sudo apt install libmagic1
-#     pip install python-magic
-#
-#   macOS:
-#     brew install libmagic
-#     pip install python-magic
-#
-#   Windows (ships its own DLL — no system lib needed):
-#     pip install python-magic-bin
-#
-# python-magic>=0.4.27        # Linux / macOS
-# python-magic-bin>=0.4.14    # Windows
