@@ -1,7 +1,7 @@
 """
 foldr.logger
 ~~~~~~~~~~~~
-Structured logging and output verbosity for FOLDR v4.
+Structured logging and output verbosity for FOLDR v0.2.1.
 
 Verbosity levels
 ----------------

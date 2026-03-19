@@ -1,7 +1,7 @@
 """
 foldr.dedup
 ~~~~~~~~~~~
-Duplicate file detection for FOLDR v4.
+Duplicate file detection for FOLDR v0.2.1.
 
 Algorithm
 ---------

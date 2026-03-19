@@ -1,4 +1,4 @@
-# FOLDR v2.1
+# FOLDR v0.2.1
 # pip install -r requirements.txt
 #
 # This installs everything FOLDR needs on any OS.

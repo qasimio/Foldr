@@ -1,5 +1,5 @@
 """
-ignore.py — FOLDR v3 ignore rules
+ignore.py — FOLDR v0.2.1 ignore rules
 
 Supports:
   - .foldrignore file in the target directory

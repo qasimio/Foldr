@@ -26,7 +26,7 @@ FOLDR cleans messy directories by sorting files into category folders — instan
 pip install foldr
 ```
 
-Requires Python 3.10+. Works on **Linux**, **macOS**, and **Windows** — no extras, no choices.
+Requires Python 3.10+. Works on **Windows**, **Linux**, **macOS**
 
 ---
 

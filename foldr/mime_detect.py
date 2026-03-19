@@ -1,7 +1,7 @@
 """
 foldr.mime_detect
 ~~~~~~~~~~~~~~~~~
-MIME-type detection for FOLDR v4.
+MIME-type detection for FOLDR v0.2.1.
 
 Used by --smart mode to catch spoofed extensions (e.g. image.png.exe).
 

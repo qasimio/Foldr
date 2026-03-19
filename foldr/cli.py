@@ -1,7 +1,7 @@
 """
 foldr.cli
 ~~~~~~~~~
-FOLDR v2.1 — Smart File Organizer
+FOLDR v0.2.1 — Smart File Organizer
 by Muhammad Qasim · github.com/qasimio/Foldr
 
 Commands
@@ -33,7 +33,6 @@ Commands
   foldr config --edit                    open config.toml in editor
   foldr config --edit --ignore-file      open .foldrignore in editor
 
-  _watch-daemon <path>                   [internal] daemon entrypoint
 """
 from __future__ import annotations
 
@@ -62,7 +61,7 @@ from foldr.models        import DedupeStrategy
 from foldr.organizer     import organize_folder
 
 _IS_WIN = platform.system() == "Windows"
-VERSION  = "2.1"
+VERSION  = "0.2.1"
 
 # ── Global flags ───────────────────────────────────────────────────────────────
 _QUIET   = False
@@ -114,6 +113,7 @@ def _banner() -> None:
     d  = _c(FG_DIM)
     m  = _c(FG_MUTED)
     r  = _c(RESET)
+
     print()
     print(f"   {a}███████╗ ██████╗ ██╗     ██████╗ ██████╗{r}")
     print(f"   {a}██╔════╝██╔═══██╗██║     ██╔══██╗██╔══██╗{r}")
@@ -121,8 +121,9 @@ def _banner() -> None:
     print(f"   {d}██╔══╝  ██║   ██║██║     ██║  ██║██╔══██╗{r}")
     print(f"   {d}██║     ╚██████╔╝███████╗██████╔╝██║  ██║{r}")
     print(f"   {d}╚═╝      ╚═════╝ ╚══════╝╚═════╝ ╚═╝  ╚═╝{r}")
-    print(f"   {m}Smart File Organizer  ·  {VERSION}{r}")
-    print(f"   {m}by Muhammad Qasim  ·  github.com/qasimio/Foldr{r}")
+
+    print(f"\n   {m}Fast, Safe folder cleanup with Preview and Undo · v{VERSION}{r}")
+    print(f"   {m}@qasimio · github.com/qasimio/Foldr{r}\n")
     print()
 
 def _box(body: str, title: str = "", col: str = "") -> None:
@@ -237,25 +238,34 @@ def _build_ignore(args: argparse.Namespace) -> list[str]:
 
 
 # ── Parser ─────────────────────────────────────────────────────────────────────
-
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="foldr",
-        description=f"FOLDR v{VERSION} — Smart File Organizer by Muhammad Qasim",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "WARNINGS\n"
             "  • Paths with spaces must be quoted:  foldr \"My Downloads\"\n"
-            "  • --dedup permanently deletes files. Always --preview first.\n"
-            "  • watch mode organizes silently — no confirmation per file.\n"
+            "  • --dedup permanently deletes files and cannot be undone.\n"
+            "    Always run with --preview first.\n"
+            "  • Watch mode runs silently — no per-file confirmation.\n"
             "\n"
             "EXAMPLES\n"
-            '  foldr ~/Downloads\n'
-            '  foldr ~/Downloads --preview\n'
-            '  foldr ~/Downloads --recursive --depth 2\n'
-            '  foldr ~/Downloads --dedup keep-newest --preview\n'
-                      '  foldr undo\n'
-            '  foldr history\n'
+            '  foldr "D:\\Downloads"                  organize files\n'
+            '  foldr "D:\\Downloads" --preview        preview changes\n'
+            '  foldr "D:\\Downloads" --recursive      include subdirectories\n'
+            '  foldr "D:\\Downloads" --recursive --depth 2\n'
+            '  foldr "D:\\Downloads" --dedup keep-newest\n'
+            '  foldr "D:\\Downloads" --ignore "*.log" "tmp/"\n'
+            '  foldr "D:\\Downloads" --no-ignore      disable ignore rules\n'
+            '  foldr "D:\\Downloads" --show-ignored   show skipped files\n'
+            "  foldr watch ~/Downloads\n"
+            "  foldr watch ~/Downloads --recursive --startup\n"
+            "  foldr unwatch ~/Downloads\n"
+            "  foldr watches\n"
+            "  foldr undo\n"
+            "  foldr undo --id <ID>\n"
+            "  foldr history\n"
+            "  foldr config\n"
         ),
     )
     p.add_argument("path",            nargs="?")
@@ -319,22 +329,54 @@ def cmd_watch(raw: list[str], args: argparse.Namespace) -> None:
 
     ignore    = _build_ignore(args)
     recursive = args.recursive
-    tmpl      = _load_tmpl(args.config)
+    config_path = args.config
+    tmpl        = _load_tmpl(config_path)
 
-    pid = spawn_daemon(target, dry_run=args.preview,
-                       recursive=recursive, extra_ignore=ignore)
-    add_watch(target, pid, dry_run=args.preview,
-              recursive=recursive)
+    # ── Approval prompt ────────────────────────────────────────────────────────
+    mode_lbl = "preview (log only, no files moved)" if args.preview else "live"
+    rec_lbl  = "yes — subdirectories included" if recursive else "no — root folder only"
+    print()
+    _box(
+        f"  Directory:  {_c(ACCENT+BOLD)}{target}{_c(RESET)}\n"
+        f"  Mode:       {_c(FG_DIM)}{mode_lbl}{_c(RESET)}\n"
+        f"  Recursive:  {_c(FG_DIM)}{rec_lbl}{_c(RESET)}\n"
+        f"\n"
+        f"  {_c(FG_MUTED)}Watch mode will:{_c(RESET)}\n"
+        f"  {_c(FG_MUTED)}  1. Organize all existing files right now (initial scan).{_c(RESET)}\n"
+        f"  {_c(FG_MUTED)}  2. Keep watching — any new or moved file is organized automatically.{_c(RESET)}\n"
+        f"  {_c(FG_MUTED)}  3. Files moved back to root are re-organized (no one-time limit).{_c(RESET)}\n"
+        f"  {_c(FG_MUTED)}  No per-file confirmation — you are approving everything now.{_c(RESET)}",
+        title=" Watch Mode ", col=COL_WARN,
+    )
+    if not _confirm("Start watch mode?", default=True):
+        _dim("Cancelled.")
+        return
+
+    pid = spawn_daemon(
+        target,
+        dry_run=args.preview,
+        recursive=recursive,
+        extra_ignore=ignore,
+        config=config_path,
+        no_ignore=getattr(args, "no_ignore", False),
+    )
+    add_watch(
+        target,
+        pid,
+        dry_run=args.preview,
+        recursive=recursive,
+        config=config_path,
+        no_ignore=getattr(args, "no_ignore", False),
+    )
 
     _info(f"Watcher started for: {_c(ACCENT+BOLD)}{target}{_c(RESET)}")
     _dim(f"PID:       {pid}")
     _dim(f"Mode:      {'preview (no moves)' if args.preview else 'live'}")
     _dim(f"Recursive: {'yes' if recursive else 'no'}")
-    _dim(f"Log:       {Path.home()/'.foldr'/'watch_logs'/(target.name+'.log')}")
+    log_file = Path.home() / ".foldr" / "watch_logs" / (target.name + ".log")
+    _dim(f"Log:       {log_file}  ← check here if nothing organizes")
     _dim(f"Stop:      foldr unwatch \"{target}\"")
     _dim(f"Status:    foldr watches")
-
-
 
 
 def cmd_unwatch(raw: list[str]) -> None:
@@ -421,7 +463,7 @@ def cmd_watch_daemon(raw: list[str], args: argparse.Namespace) -> None:
     if not ts:
         sys.exit(1)
     target = Path(ts).resolve()
-    tmpl   = _load_tmpl(getattr(args,"config",None))
+    tmpl   = _load_tmpl(getattr(args, "config", None))
     ignore = _build_ignore(args)
     from foldr.watch import run_watch
     run_watch(
@@ -482,8 +524,8 @@ def cmd_undo(args: argparse.Namespace) -> None:
 
 
 def cmd_history(args: argparse.Namespace) -> None:
-    limit   = None if getattr(args,"all",False) else 50
-    entries = list_history(limit=limit or 50)
+    limit   = sys.maxsize if getattr(args, "all", False) else 50
+    entries = list_history(limit=limit)
     if not entries:
         _warn("No history found. Run 'foldr <path>' to start."); return
     _rule("Operation History"); print()
@@ -712,6 +754,7 @@ def main() -> None:
     _SUBCMDS = {"watch","unwatch","watches","undo","history","config","_watch-daemon"}
     sub = next((a for a in raw if not a.startswith("-") and a in _SUBCMDS), None)
 
+    _banner()
     parser = _build_parser()
     args, _ = parser.parse_known_args(raw)
 

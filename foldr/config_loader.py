@@ -1,7 +1,7 @@
 """
 foldr.config_loader
 ~~~~~~~~~~~~~~~~~~~~
-Category configuration loader for FOLDR v4.
+Category configuration loader for FOLDR v0.2.1.
 
 Config search order  (highest priority first)
 ----------------------------------------------
