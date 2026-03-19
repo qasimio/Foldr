@@ -62,16 +62,21 @@ def _is_alive(pid: int) -> bool:
     """Cross-platform PID liveness check."""
     try:
         if _IS_WIN:
-            import ctypes
-            SYNCHRONIZE = 0x100000
-            handle = ctypes.windll.kernel32.OpenProcess(  # type: ignore[attr-defined]
-                SYNCHRONIZE, False, pid
-            )
-            if handle:
-                result = ctypes.windll.kernel32.WaitForSingleObject(handle, 0)  # type: ignore[attr-defined]
-                ctypes.windll.kernel32.CloseHandle(handle)                       # type: ignore[attr-defined]
-                return result == 0x102   # WAIT_TIMEOUT → still running
-            return False
+            try:
+                import ctypes
+                windll = getattr(ctypes, "windll", None)
+                if windll is None:
+                    return False
+                k32    = windll.kernel32
+                SYNC   = 0x100000
+                h      = k32.OpenProcess(SYNC, False, pid)
+                if h:
+                    r = k32.WaitForSingleObject(h, 0)
+                    k32.CloseHandle(h)
+                    return r == 0x102
+                return False
+            except Exception:
+                return False
         else:
             os.kill(pid, 0)
             return True
@@ -126,23 +131,20 @@ def increment_count(path: Path, n: int = 1) -> None:
         _save(data)
 
 
-# ── Windows: find windowless Python ───────────────────────────────────────────
-
-def _win_python_exe() -> str:
+def _get_python() -> str:
     """
-    Return the path to pythonw.exe (no console window) on Windows.
-    Falls back to python.exe with CREATE_NO_WINDOW flag if not found.
+    Return the absolute path to the Python executable for daemon spawning.
+    Uses sys.executable (absolute path to venv python) so startup entries
+    work after reboot without needing to activate the venv.
+    On Windows, prefers pythonw.exe to avoid console popups.
     """
-    exe = Path(sys.executable)
-    # Look for pythonw.exe in the same directory
-    candidates = [
-        exe.parent / "pythonw.exe",
-        exe.parent / "Scripts" / "pythonw.exe",
-    ]
-    for c in candidates:
-        if c.exists():
-            return str(c)
-    return str(exe)   # fallback: python.exe + CREATE_NO_WINDOW flag
+    exe = Path(sys.executable).resolve()
+    if _IS_WIN:
+        for cand in [exe.parent / "pythonw.exe",
+                     exe.parent / "Scripts" / "pythonw.exe"]:
+            if cand.exists():
+                return str(cand)
+    return str(exe)
 
 
 # ── Daemon spawn ───────────────────────────────────────────────────────────────
@@ -161,7 +163,7 @@ def spawn_daemon(
     Unix    : uses start_new_session=True (equivalent to double-fork/setsid)
     """
     cmd = [
-        _win_python_exe() if _IS_WIN else sys.executable,
+        _get_python(),
         "-m", "foldr.cli",
         "_watch-daemon", str(target.resolve()),
     ]
@@ -262,13 +264,13 @@ def unregister_startup(target: Path) -> tuple[bool, str]:
     if _IS_WIN:
         try:
             import winreg  # type: ignore[import]
-            key = winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
+            key = winreg.OpenKey(  # type: ignore[attr-defined]
+                winreg.HKEY_CURRENT_USER,  # type: ignore[attr-defined]
                 r"Software\Microsoft\Windows\CurrentVersion\Run",
-                0, winreg.KEY_SET_VALUE,
+                0, winreg.KEY_SET_VALUE,  # type: ignore[attr-defined]
             )
-            winreg.DeleteValue(key, name)
-            winreg.CloseKey(key)
+            winreg.DeleteValue(key, name)  # type: ignore[attr-defined]
+            winreg.CloseKey(key)  # type: ignore[attr-defined]
             return True, f"Removed Windows startup entry: {name}"
         except Exception as e:
             return False, str(e)
@@ -297,16 +299,16 @@ def _register_startup_windows(target: Path, name: str, recursive: bool) -> tuple
     try:
         import winreg  # type: ignore[import]
         cmd = (
-            f'"{_win_python_exe()}" -m foldr.cli _watch-daemon "{target}"'
+            f'"{_get_python()}" -m foldr.cli _watch-daemon "{target.resolve()}"'
             + (" --recursive" if recursive else "")
         )
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
+        key = winreg.OpenKey(  # type: ignore[attr-defined]
+            winreg.HKEY_CURRENT_USER,  # type: ignore[attr-defined]
             r"Software\Microsoft\Windows\CurrentVersion\Run",
-            0, winreg.KEY_SET_VALUE,
+            0, winreg.KEY_SET_VALUE,  # type: ignore[attr-defined]
         )
-        winreg.SetValueEx(key, name, 0, winreg.REG_SZ, cmd)
-        winreg.CloseKey(key)
+        winreg.SetValueEx(key, name, 0, winreg.REG_SZ, cmd)  # type: ignore[attr-defined]
+        winreg.CloseKey(key)  # type: ignore[attr-defined]
         return True, f"Registered Windows startup: HKCU\\...\\Run\\{name}"
     except Exception as e:
         return False, f"Windows startup registration failed: {e}"
@@ -316,7 +318,7 @@ def _register_startup_macos(target: Path, name: str, recursive: bool) -> tuple[b
     agents_dir = Path.home() / "Library" / "LaunchAgents"
     agents_dir.mkdir(parents=True, exist_ok=True)
     plist_path = agents_dir / f"com.{name}.plist"
-    args = [sys.executable, "-m", "foldr.cli", "_watch-daemon", str(target)]
+    args = [_get_python(), "-m", "foldr.cli", "_watch-daemon", str(target.resolve())]
     if recursive:
         args.append("--recursive")
     args_xml = "\n".join(f"        <string>{a}</string>" for a in args)
@@ -350,7 +352,7 @@ def _register_startup_linux(target: Path, name: str, recursive: bool) -> tuple[b
     systemd_dir = Path.home() / ".config" / "systemd" / "user"
     systemd_dir.mkdir(parents=True, exist_ok=True)
     service_path = systemd_dir / f"{name}.service"
-    cmd = f"{sys.executable} -m foldr.cli _watch-daemon {target}"
+    cmd = f'"{_get_python()}" -m foldr.cli _watch-daemon "{target.resolve()}"'
     if recursive:
         cmd += " --recursive"
     unit = f"""[Unit]

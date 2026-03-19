@@ -1,4 +1,4 @@
-# FOLDR v4.1 — requirements.txt
+# FOLDR 2.1 — requirements.txt
 # ─────────────────────────────────────────────────────────────────────────────
 # Minimal install (recommended):
 #   pip install -r requirements.txt

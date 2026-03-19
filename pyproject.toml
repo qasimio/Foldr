@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "foldr"
-version         = "4.1.0"
+version         = "2.1.0"
 description     = "Smart file organizer — CLI, cross-platform, watch mode, undo"
 readme          = "README.md"
 license         = { text = "MIT" }
@@ -25,45 +25,15 @@ classifiers = [
     "Topic :: Utilities",
 ]
 
-# ── Runtime dependencies ───────────────────────────────────────────────────────
+# One install — everything included. No extras needed.
 #
-# watchdog  — OS-native file system events for `foldr watch`
-#             Linux   : inotify
-#             macOS   : FSEvents / kqueue
-#             Windows : ReadDirectoryChangesW
-#
-# tabulate  — table formatting for history / dedup output
-#             (graceful plain-text fallback if absent — but output looks better with it)
-#
-# colorama  — Windows only: ANSI safety net for older terminals.
-#             Windows 10+ is auto-enabled via ctypes in term.py;
-#             colorama handles Win8/older PowerShell as a fallback.
+#   pip install foldr
 #
 dependencies = [
     "watchdog>=4.0.0",
     "tabulate>=0.9.0",
-    "colorama>=0.4.6 ; platform_system == 'Windows'",
-]
-
-[project.optional-dependencies]
-# TOML config support on Python 3.10
-# (Python 3.11+ ships tomllib in the standard library — nothing to install)
-toml = [
     "tomli>=2.0.1 ; python_version < '3.11'",
-]
-
-# --smart: detect file type by content rather than extension
-# Also needs a system library — see README for per-OS install instructions
-smart = [
-    "python-magic>=0.4.27     ; platform_system != 'Windows'",
-    "python-magic-bin>=0.4.14 ; platform_system == 'Windows'",
-]
-
-# Everything at once
-all = [
-    "tomli>=2.0.1             ; python_version < '3.11'",
-    "python-magic>=0.4.27     ; platform_system != 'Windows'",
-    "python-magic-bin>=0.4.14 ; platform_system == 'Windows'",
+    "colorama>=0.4.6 ; platform_system == 'Windows'",
 ]
 
 [project.scripts]

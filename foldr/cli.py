@@ -1,7 +1,7 @@
 """
 foldr.cli
 ~~~~~~~~~
-FOLDR v4.1 — Smart File Organizer by Muhammad Qasim
+FOLDR 2.1 — Smart File Organizer by Muhammad Qasim
      github.com/qasimio/Foldr
 
 Usage
@@ -77,18 +77,9 @@ def _w() -> int:
 def _c(code: str) -> str:
     return "" if _NOCOLOR else code
 
-def _print(*args: object, **kw: object) -> None:
+def _print(*args: object, sep: str | None = " ", end: str | None = "\n", file=None, flush: bool = False) -> None:
     if not _QUIET:
-        kwargs = {}
-        if 'sep' in kw:
-            kwargs['sep'] = kw['sep']
-        if 'end' in kw:
-            kwargs['end'] = kw['end']
-        if 'file' in kw:
-            kwargs['file'] = kw['file']
-        if 'flush' in kw:
-            kwargs['flush'] = kw['flush']
-        print(*args, **kwargs)
+        print(*args, sep=sep, end=end, file=file, flush=flush)
 
 def _ok(msg: str)   -> None: _print(f"  {_c(COL_OK)}ok{_c(RESET)}  {msg}")
 def _warn(msg: str) -> None: _print(f"  {_c(COL_WARN)}!{_c(RESET)}   {msg}")
@@ -118,8 +109,8 @@ def _banner() -> None:
     print(f"   {d}██╔══╝  ██║   ██║██║     ██║  ██║██╔══██╗{r}")
     print(f"   {d}██║     ╚██████╔╝███████╗██████╔╝██║  ██║{r}")
     print(f"   {d}╚═╝      ╚═════╝ ╚══════╝╚═════╝ ╚═╝  ╚═╝{r}")
-    print(f"   {m}Smart File Organizer  ·  v4.1  ·  by Muhammad Qasim{r}")
-    print(f"   {m}github.com/qasimio/Foldr{r}")
+    print(f"   {m}Smart File Organizer  ·  2.1{r}")
+    print(f"   {m}by Muhammad Qasim  ·  github.com/qasimio/Foldr{r}")
     print()
 
 def _box(body: str, title: str = "", col: str = "") -> None:
@@ -306,7 +297,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="foldr",
         description=(
-            "FOLDR v4.1 — Smart File Organizer\n"
+            "FOLDR 2.1 — Smart File Organizer\n"
             "by Muhammad Qasim  ·  github.com/qasimio/Foldr"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -376,7 +367,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--all",          action="store_true",
                    help="Show all history entries (removes 50-entry limit)")
     p.add_argument("--edit",         action="store_true",
-                   help="(config) open config.toml in your default editor")
+                   help="(config) open config.toml in your editor")
+    p.add_argument("--ignore-file",  action="store_true", dest="ignore_file",
+                   help="(config --edit) open .foldrignore instead of config.toml")
     return p
 
 
@@ -657,7 +650,20 @@ def cmd_config(args: argparse.Namespace) -> None:
     cfg_path  = default_config_path()
 
     if getattr(args, "edit", False):
-        # Open in editor
+        # Decide which file to edit: config.toml or .foldrignore
+        edit_ignore = getattr(args, "ignore_file", False)
+        target_file = (foldr_dir / ".foldrignore") if edit_ignore else cfg_path
+        # Ensure the file exists before opening
+        if not target_file.exists():
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            if edit_ignore:
+                target_file.write_text(
+                    "# FOLDR global ignore rules\n"
+                    "# One pattern per line. Applied to every foldr run.\n"
+                    "# Disable for one run with: foldr <path> --no-ignore\n"
+                    "#\n# Examples:\n# *.tmp\n# *.bak\n# desktop.ini\n",
+                    encoding="utf-8",
+                )
         import shutil as sh
         editor = (
             os.environ.get("VISUAL")
@@ -665,10 +671,10 @@ def cmd_config(args: argparse.Namespace) -> None:
             or ("notepad" if _IS_WIN else "nano")
         )
         if sh.which(editor):
-            os.execvp(editor, [editor, str(cfg_path)])
+            os.execvp(editor, [editor, str(target_file)])
         else:
             _err(f"Editor not found: {editor}")
-            _dim(f"Edit manually: {cfg_path}")
+            _dim(f"Edit manually: {target_file}")
         return
 
     _rule("FOLDR Config")
