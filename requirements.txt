@@ -1,65 +1,50 @@
-# FOLDR 2.1 — requirements.txt
+# FOLDR v2.1 — requirements.txt
 # ─────────────────────────────────────────────────────────────────────────────
-# Minimal install (recommended):
+# Install everything with one command:
 #   pip install -r requirements.txt
 #
-# Full install (includes TOML config + smart mode):
-#   pip install "foldr[all]"
-#
-# All dependencies work on Linux, macOS, and Windows.
+# Works on Linux, macOS, and Windows without any extras or choices.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-# ── Required on all platforms ─────────────────────────────────────────────────
+# ── Core (required on all platforms) ─────────────────────────────────────────
 
-# File system event watching — used by `foldr watch` and `foldr unwatch`
-# Uses OS-native backends selected automatically:
+# File system event watching — used by `foldr watch`
+# OS-native backends, zero CPU when idle:
 #   Linux   → inotify
 #   macOS   → FSEvents / kqueue
 #   Windows → ReadDirectoryChangesW
 watchdog>=4.0.0
 
-# Table formatting for `foldr history` and `foldr --dedup` output.
-# FOLDR falls back to plain-text if missing, but tables look much better with it.
+# Table formatting for history / dedup / watches output
+# FOLDR falls back to plain text if missing, but tables look better with it
 tabulate>=0.9.0
 
+# TOML config file support for Python 3.10
+# Python 3.11+ has tomllib built-in — tomli is skipped automatically
+tomli>=2.0.1 ; python_version < "3.11"
 
-# ── Windows only ──────────────────────────────────────────────────────────────
 
-# ANSI colour safety net for older Windows terminals.
-# Windows 10 build 14931+ is auto-enabled via ctypes in term.py.
-# colorama handles Windows 8 / older PowerShell builds.
-# pip resolves the platform_system marker automatically — safe to leave on all OS.
+# ── Windows only (installed automatically by pip on Windows) ──────────────────
+
+# ANSI colour support in cmd.exe and older PowerShell
+# Win10 build 14931+ is auto-enabled via ctypes — colorama is a safety net
 colorama>=0.4.6 ; sys_platform == "win32"
 
 
-# ── Optional: TOML config support ────────────────────────────────────────────
-# Only needed on Python 3.10.
-# Python 3.11+ ships tomllib in the standard library.
-# Uncomment if you are on Python 3.10 and want ~/.foldr/config.toml:
-#
-# tomli>=2.0.1
-
-
-# ── Optional: --smart mode ────────────────────────────────────────────────────
-# Detects file type by reading the first bytes, not just the extension.
-# Catches misnamed files (e.g. malware.pdf that is really an .exe).
-#
-# Requires a system library AND a Python package:
+# ── Optional: --smart mode (detect files by content, not just extension) ──────
+# Also needs a system library — install ONE of:
 #
 #   Linux:
-#     sudo apt install libmagic1      (Debian / Ubuntu / Mint)
-#     sudo dnf install file-libs      (Fedora / RHEL / CentOS)
-#     sudo pacman -S file             (Arch Linux)
+#     sudo apt install libmagic1
 #     pip install python-magic
 #
 #   macOS:
 #     brew install libmagic
 #     pip install python-magic
 #
-#   Windows (includes its own DLL — no system library needed):
+#   Windows (ships its own DLL — no system lib needed):
 #     pip install python-magic-bin
 #
-# Uncomment whichever applies:
 # python-magic>=0.4.27        # Linux / macOS
 # python-magic-bin>=0.4.14    # Windows

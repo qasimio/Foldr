@@ -1,19 +1,22 @@
 """
 foldr.watch
 ~~~~~~~~~~~
-Background directory watcher for FOLDR 2.1.
+Background directory watcher for FOLDR v2.1.
 
-Key fixes
----------
-1. Removed _seen_in_session — files can be re-organized if moved back to root.
-   Loop prevention: _organize_one checks if file is already in a category folder.
+What it does
+------------
+1. Runs an initial scan of the directory (organizes existing files).
+2. Watches for new / moved / modified files and organizes them immediately.
+3. Files moved back to root get re-organized (no _seen_in_session set).
+4. Category-folder files are skipped to prevent infinite loops.
 
-2. Initial scan on startup — organizes existing unorganized files immediately.
+Cross-platform file events
+--------------------------
+  Linux   : inotify  (0% CPU when idle)
+  macOS   : kqueue / FSEvents
+  Windows : ReadDirectoryChangesW
 
-3. on_moved handler — catches files moved INTO the watched directory (not just created).
-
-4. Daemon re-registers its PID in watches.json on startup — so 'foldr watches'
-   shows accurate info after a reboot.
+No rich, no pyfiglet, no TUI — plain terminal output.
 """
 from __future__ import annotations
 
@@ -28,10 +31,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from foldr.term import (
-    ACCENT, BOLD, COL_OK, COL_WARN, FG_MUTED, RESET, cat_fg, cat_icon,
+    ACCENT, BOLD, COL_OK, COL_WARN, FG_MUTED, RESET,
+    cat_fg, cat_icon,
 )
 from foldr.history import save_history
-from foldr.organizer import _classify_file, _matches_any
 
 _IN_PROGRESS: frozenset[str] = frozenset({
     ".crdownload", ".part", ".tmp", ".download",
@@ -41,7 +44,10 @@ _IN_PROGRESS: frozenset[str] = frozenset({
 _LOG_DIR = Path.home() / ".foldr" / "watch_logs"
 
 
+# ── Utilities ──────────────────────────────────────────────────────────────────
+
 def _normalize_path(src: object) -> Path:
+    """Normalize watchdog src_path (str/bytes/bytearray/memoryview)."""
     if isinstance(src, memoryview):
         src = bytes(src)
     if isinstance(src, (bytes, bytearray)):
@@ -50,6 +56,7 @@ def _normalize_path(src: object) -> Path:
 
 
 def _file_stable(p: Path) -> bool:
+    """Return True when the file has stopped growing."""
     try:
         before = p.stat().st_size
     except OSError:
@@ -68,21 +75,21 @@ def _get_logger(base: Path) -> logging.Logger:
     name     = f"foldr.watch.{safe}"
     logger   = logging.getLogger(name)
     if not logger.handlers:
-        handler = logging.FileHandler(log_file, encoding="utf-8")
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s  %(levelname)-8s  %(message)s")
-        )
-        logger.addHandler(handler)
+        h = logging.FileHandler(log_file, encoding="utf-8")
+        h.setFormatter(logging.Formatter("%(asctime)s  %(levelname)-8s  %(message)s"))
+        logger.addHandler(h)
         logger.setLevel(logging.INFO)
     return logger
 
 
-def _get_category_folders(base: Path, template: dict | None) -> set[str]:
-    """Return the set of folder names FOLDR creates inside base."""
+def _category_folder_names(template: dict | None) -> set[str]:
+    """Return the set of folder names FOLDR creates (for loop prevention)."""
     from foldr.config import CATEGORIES_TEMPLATE
     tmpl = template or CATEGORIES_TEMPLATE
     return {v["folder"] for v in tmpl.values()}
 
+
+# ── Single-file organizer ──────────────────────────────────────────────────────
 
 def _organize_one(
     file_path: Path,
@@ -91,16 +98,18 @@ def _organize_one(
     dry_run: bool,
     ignore_patterns: list[str],
     logger: logging.Logger,
-    category_folders: set[str],
+    cat_folders: set[str],
 ) -> tuple[str, str] | None:
     """
     Organize exactly one file.
 
-    Loop prevention (no _seen_in_session):
-    Files that are already inside a FOLDR category folder are skipped.
-    Files that have been moved back to root can be organized again.
+    Loop prevention: if the file is currently inside a FOLDR category folder,
+    skip it. This replaces _seen_in_session — it's stateless and correct even
+    when files are moved back to root.
     """
     from foldr.config import CATEGORIES_TEMPLATE
+    from foldr.organizer import _matches_any
+
     tmpl = template or CATEGORIES_TEMPLATE
 
     if not file_path.exists() or not file_path.is_file():
@@ -109,25 +118,35 @@ def _organize_one(
     try:
         file_parent   = file_path.parent.resolve()
         base_resolved = base.resolve()
-
         if file_parent != base_resolved:
-            # File is in a subdirectory — check if it's already in a category folder
             try:
-                rel_parts = file_parent.relative_to(base_resolved).parts
+                rel = file_parent.relative_to(base_resolved)
+                if rel.parts and rel.parts[0] in cat_folders:
+                    return None   # already in a category folder
             except ValueError:
-                return None  # outside base entirely
-
-            if rel_parts and rel_parts[0] in category_folders:
-                return None  # already organized — do not re-move
+                return None       # outside base
     except OSError:
         return None
 
-    if _matches_any(file_path.name, str(file_path), ignore_patterns):
-        logger.info("SKIP (ignored)      %s", file_path.name)
-        return None
+    # Ignore rules
+    try:
+        if _matches_any(file_path.name, str(file_path), ignore_patterns):
+            logger.info("SKIP (ignored)      %s", file_path.name)
+            return None
+    except Exception:
+        pass
 
-    cat, dest_folder = _classify_file(file_path, tmpl)
-    if not cat or not dest_folder:
+    # Classify
+    ext = file_path.suffix.lower()
+    cat_name: str | None = None
+    dest_folder: str | None = None
+    for name, cat in tmpl.items():
+        if ext in cat.get("ext", set()):
+            cat_name    = name
+            dest_folder = cat["folder"]
+            break
+
+    if not cat_name or not dest_folder:
         logger.info("SKIP (unknown ext)  %s", file_path.name)
         return None
 
@@ -136,17 +155,15 @@ def _organize_one(
 
     try:
         if file_path.resolve() == dest_path.resolve():
-            logger.info("SKIP (already here) %s", file_path.name)
             return None
     except OSError:
         pass
 
     if dry_run:
         logger.info("PREVIEW  %s  ->  %s/", file_path.name, dest_folder)
-        return cat, dest_folder
+        return cat_name, dest_folder
 
     dest_dir.mkdir(parents=True, exist_ok=True)
-
     if dest_path.exists():
         stem, suf, n = file_path.stem, file_path.suffix, 1
         while dest_path.exists():
@@ -155,8 +172,10 @@ def _organize_one(
 
     shutil.move(str(file_path), str(dest_path))
     logger.info("MOVED  %s  ->  %s/", file_path.name, dest_folder)
-    return cat, dest_folder
+    return cat_name, dest_folder
 
+
+# ── Core watcher ───────────────────────────────────────────────────────────────
 
 def run_watch(
     base: Path,
@@ -167,26 +186,33 @@ def run_watch(
     daemon_mode: bool = False,
 ) -> None:
     """
-    1. Immediately organize all existing files in base (initial scan).
-    2. Then watch for new/modified/moved files forever.
+    Organize base immediately, then watch for future changes forever.
 
-    After reboot: the daemon restarts via systemd/registry, runs the initial
-    scan to catch anything that arrived while it was down, then resumes watching.
+    Parameters
+    ----------
+    base          : directory to watch
+    template      : category template (None = built-in defaults)
+    dry_run       : log but don't move files
+    recursive     : watch subdirectories too
+    extra_ignore  : patterns from --ignore flag
+    daemon_mode   : True when spawned as background daemon
     """
     try:
         from watchdog.observers import Observer               # type: ignore[import]
         from watchdog.events import FileSystemEventHandler   # type: ignore[import]
     except ImportError:
-        msg = "\n  watchdog not installed.\n  Run: pip install watchdog\n"
-        (_get_logger(base).error if daemon_mode else
-         lambda m: print(m, file=sys.stderr))("watchdog not installed")
+        msg = "\n  watchdog not installed. Run: pip install watchdog\n"
+        if daemon_mode:
+            _get_logger(base).error("watchdog not installed")
+        else:
+            print(msg, file=sys.stderr)
         sys.exit(1)
 
-    logger           = _get_logger(base)
-    ignore_patterns  = list(extra_ignore or [])
-    category_folders = _get_category_folders(base, template)
+    logger          = _get_logger(base)
+    ignore_patterns = list(extra_ignore or [])
+    cat_folders     = _category_folder_names(template)
 
-    def _log_event(filename: str, dest: str, category: str) -> None:
+    def _log(filename: str, dest: str, category: str) -> None:
         logger.info("-> %s  =>  %s/", filename, dest)
         if not daemon_mode:
             tag = f"  {COL_WARN}preview{RESET}" if dry_run else f"  {COL_OK}->{RESET}"
@@ -200,7 +226,7 @@ def run_watch(
             )
             sys.stdout.flush()
 
-    # ── Step 1: Initial scan ───────────────────────────────────────────────────
+    # ── Step 1: initial scan ───────────────────────────────────────────────────
     logger.info("INITIAL SCAN  %s  recursive=%s", base, recursive)
     try:
         from foldr.organizer import organize_folder
@@ -210,34 +236,31 @@ def run_watch(
             recursive=recursive,
             extra_ignore=ignore_patterns,
             category_template=template,
-            global_ignore=True,
         )
         n = len(result.records)
         logger.info("INITIAL SCAN: %d files organized", n)
         if n > 0 and not dry_run:
-            save_history(result.records, base, dry_run=False, op_type="organize")
+            save_history(result.records, base, dry_run)
         for r in result.records:
-            _log_event(r.filename, Path(r.destination).parent.name, r.category)
+            _log(r.filename, Path(r.destination).parent.name, r.category)
     except Exception as exc:
         logger.warning("INITIAL SCAN ERROR: %s", exc)
 
-    # ── Step 2: Register PID in watches.json (daemon restart fix) ─────────────
+    # ── Step 2: update PID in watches.json (daemon restart fix) ───────────────
     if daemon_mode:
         try:
-            from foldr.watches import _load, _save
+            from foldr.watches import _load, _save, add_watch
             data = _load()
             key  = str(base.resolve())
             if key in data:
                 data[key]["pid"] = os.getpid()
                 _save(data)
             else:
-                # Entry was deleted — recreate it
-                from foldr.watches import add_watch
                 add_watch(base, pid=os.getpid(), dry_run=dry_run, recursive=recursive)
         except Exception as exc:
             logger.warning("PID update failed: %s", exc)
 
-    # ── Step 3: File event watcher ─────────────────────────────────────────────
+    # ── Step 3: event watcher ──────────────────────────────────────────────────
     _pending: dict[str, float] = {}
     _lock    = threading.Lock()
     _stop    = threading.Event()
@@ -247,11 +270,10 @@ def run_watch(
         try:
             base_res = base.resolve()
             parent   = p.parent.resolve()
-            # Filter events from inside category folders
             try:
                 rel = parent.relative_to(base_res)
-                if rel.parts and rel.parts[0] in category_folders:
-                    return   # already organized
+                if rel.parts and rel.parts[0] in cat_folders:
+                    return   # already in a category folder — ignore
             except ValueError:
                 return       # outside base
             if not recursive and parent != base_res:
@@ -273,7 +295,7 @@ def run_watch(
                 _enqueue(str(_normalize_path(getattr(event, "src_path", ""))))
 
         def on_moved(self, event: object) -> None:      # type: ignore[override]
-            # Catches files moved INTO the watched folder from elsewhere
+            # Fires when a file is dragged / moved INTO the watched folder
             if not getattr(event, "is_directory", False):
                 dest = getattr(event, "dest_path", None)
                 if dest:
@@ -294,17 +316,14 @@ def run_watch(
                     continue
                 if not _file_stable(p):
                     continue
-
                 outcome = _organize_one(
                     p, base, template, dry_run,
-                    ignore_patterns, logger, category_folders,
+                    ignore_patterns, logger, cat_folders,
                 )
                 if outcome is None:
                     continue
-
                 cat, dest = outcome
-                _log_event(p.name, dest, cat)
-
+                _log(p.name, dest, cat)
                 if not dry_run:
                     from foldr.organizer import OperationRecord
                     rec = OperationRecord(
@@ -315,7 +334,7 @@ def run_watch(
                         category=cat,
                         timestamp=datetime.now(timezone.utc).isoformat(),
                     )
-                    save_history([rec], base, dry_run=False, op_type="organize")
+                    save_history([rec], base, dry_run)
                     if daemon_mode:
                         try:
                             from foldr.watches import increment_count
@@ -346,9 +365,9 @@ def run_watch(
     # Foreground
     mode = f"{COL_WARN}preview{RESET}" if dry_run else f"{COL_OK}live{RESET}"
     print(
-        f"\n  Watching  {ACCENT + BOLD}{base}{RESET}  [{mode}]\n"
+        f"\n  Watching  {ACCENT}{BOLD}{base}{RESET}  [{mode}]\n"
         f"  {FG_MUTED}New and modified files will be organized automatically.{RESET}\n"
-        f"  {FG_MUTED}Files moved back to this folder will be re-organized.{RESET}\n"
+        f"  {FG_MUTED}Files moved back to root will be re-organized.{RESET}\n"
         f"  {FG_MUTED}Press Ctrl+C to stop.{RESET}\n"
     )
     try:
