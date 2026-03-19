@@ -1,4 +1,4 @@
-# FOLDR v4.1 — User Manual
+# FOLDR 2.1 — User Manual
 
 **GitHub:** https://github.com/qasimio/Foldr  
 **Install:** `pip install foldr`
@@ -291,7 +291,7 @@ Unrecognised extensions are never moved.
 
 **`undo --id abc` not found** — run `foldr history` for valid IDs. Partial match works (4+ chars).
 
-**`.foldrignore` first line not matching** — save as UTF-8 (without BOM) if possible. FOLDR strips BOM automatically in v4.1+.
+**`.foldrignore` first line not matching** — save as UTF-8 (without BOM) if possible. FOLDR strips BOM automatically in 2.1+.
 
 **`config.toml` not loading** — must be at `~/.foldr/config.toml` (not `~/.config/foldr/`).
 
