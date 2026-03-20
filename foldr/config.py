@@ -8,7 +8,7 @@ CATEGORIES_TEMPLATE = {
     "Text & Data": {
         "folder": "Text_Data",
         "ext": {
-            ".ndjson", ".properties", ".toml", ".xml", ".yaml", ".yml", ".txt", ".env"
+            ".ndjson", ".properties", ".json", ".toml", ".xml", ".yaml", ".yml", ".txt", ".env"
         },
     },
     "Images": {
@@ -224,6 +224,6 @@ FOLDR CATEGORIES is a dictionary that defines 31 categories of files, each with 
 - Subprojects: 4
 - Misc: 5
 
-Total: 31 categories, 239 extensions
+Total: 31 categories, 240+ extensions
 
 """

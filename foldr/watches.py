@@ -1,7 +1,7 @@
 """
 foldr.watches
 ~~~~~~~~~~~~~
-Persistent watch registry for FOLDR v2.1.
+Persistent watch registry for FOLDR v0.2.1.
 
 How startup-on-reboot works
 ----------------------------

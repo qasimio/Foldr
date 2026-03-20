@@ -1,7 +1,7 @@
 """
 foldr.organizer
 ~~~~~~~~~~~~~~~
-Core file-organisation engine for FOLDR v3.
+Core file-organisation engine for FOLDR v0.2.1.
 
 Design rules
 ------------

@@ -1,7 +1,7 @@
 """
 foldr.empty_dirs
 ~~~~~~~~~~~~~~~~
-Empty directory scanning and optional removal for FOLDR v4.
+Empty directory scanning and optional removal for FOLDR v0.2.1.
 
 Design
 ------

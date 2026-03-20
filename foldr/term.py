@@ -2,7 +2,6 @@
 foldr.term
 ~~~~~~~~~~
 Cross-platform colour and string helpers. Zero dependencies.
-No TUI. No raw key reading. No curses. No select/tty/termios.
 
 Windows: ANSI enabled via ctypes at import time (Win10+).
          colorama used as safety net if installed.

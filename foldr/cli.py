@@ -1,7 +1,7 @@
 """
 foldr.cli
 ~~~~~~~~~
-FOLDR v2.1 — Smart File Organizer
+FOLDR v0.2.1 — Smart File Organizer
 by Muhammad Qasim · github.com/qasimio/Foldr
 
 Commands
@@ -61,7 +61,7 @@ from foldr.models        import DedupeStrategy
 from foldr.organizer     import organize_folder
 
 _IS_WIN = platform.system() == "Windows"
-VERSION  = "2.1"
+VERSION  = "0.2.1"
 
 # ── Global flags ───────────────────────────────────────────────────────────────
 _QUIET   = False
@@ -113,6 +113,7 @@ def _banner() -> None:
     d  = _c(FG_DIM)
     m  = _c(FG_MUTED)
     r  = _c(RESET)
+
     print()
     print(f"   {a}███████╗ ██████╗ ██╗     ██████╗ ██████╗{r}")
     print(f"   {a}██╔════╝██╔═══██╗██║     ██╔══██╗██╔══██╗{r}")
@@ -120,8 +121,9 @@ def _banner() -> None:
     print(f"   {d}██╔══╝  ██║   ██║██║     ██║  ██║██╔══██╗{r}")
     print(f"   {d}██║     ╚██████╔╝███████╗██████╔╝██║  ██║{r}")
     print(f"   {d}╚═╝      ╚═════╝ ╚══════╝╚═════╝ ╚═╝  ╚═╝{r}")
-    print(f"   {m}Smart File Organizer  ·  {VERSION}{r}")
-    print(f"   {m}by Muhammad Qasim  ·  github.com/qasimio/Foldr{r}")
+
+    print(f"\n   {m}Fast, Safe folder cleanup with Preview and Undo · v{VERSION}{r}")
+    print(f"   {m}@qasimio · github.com/qasimio/Foldr{r}\n")
     print()
 
 def _box(body: str, title: str = "", col: str = "") -> None:
@@ -236,25 +238,34 @@ def _build_ignore(args: argparse.Namespace) -> list[str]:
 
 
 # ── Parser ─────────────────────────────────────────────────────────────────────
-
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="foldr",
-        description=f"FOLDR v{VERSION} — Smart File Organizer by Muhammad Qasim",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "WARNINGS\n"
             "  • Paths with spaces must be quoted:  foldr \"My Downloads\"\n"
-            "  • --dedup permanently deletes files. Always --preview first.\n"
-            "  • watch mode organizes silently — no confirmation per file.\n"
+            "  • --dedup permanently deletes files and cannot be undone.\n"
+            "    Always run with --preview first.\n"
+            "  • Watch mode runs silently — no per-file confirmation.\n"
             "\n"
             "EXAMPLES\n"
-            '  foldr ~/Downloads\n'
-            '  foldr ~/Downloads --preview\n'
-            '  foldr ~/Downloads --recursive --depth 2\n'
-            '  foldr ~/Downloads --dedup keep-newest --preview\n'
-                      '  foldr undo\n'
-            '  foldr history\n'
+            '  foldr "D:\\Downloads"                  organize files\n'
+            '  foldr "D:\\Downloads" --preview        preview changes\n'
+            '  foldr "D:\\Downloads" --recursive      include subdirectories\n'
+            '  foldr "D:\\Downloads" --recursive --depth 2\n'
+            '  foldr "D:\\Downloads" --dedup keep-newest\n'
+            '  foldr "D:\\Downloads" --ignore "*.log" "tmp/"\n'
+            '  foldr "D:\\Downloads" --no-ignore      disable ignore rules\n'
+            '  foldr "D:\\Downloads" --show-ignored   show skipped files\n'
+            "  foldr watch ~/Downloads\n"
+            "  foldr watch ~/Downloads --recursive --startup\n"
+            "  foldr unwatch ~/Downloads\n"
+            "  foldr watches\n"
+            "  foldr undo\n"
+            "  foldr undo --id <ID>\n"
+            "  foldr history\n"
+            "  foldr config\n"
         ),
     )
     p.add_argument("path",            nargs="?")
@@ -743,6 +754,7 @@ def main() -> None:
     _SUBCMDS = {"watch","unwatch","watches","undo","history","config","_watch-daemon"}
     sub = next((a for a in raw if not a.startswith("-") and a in _SUBCMDS), None)
 
+    _banner()
     parser = _build_parser()
     args, _ = parser.parse_known_args(raw)
 

@@ -1,7 +1,7 @@
 """
 foldr.watch
 ~~~~~~~~~~~
-Background directory watcher for FOLDR v2.1.
+Background directory watcher for FOLDR v0.2.1.
 
 What it does
 ------------

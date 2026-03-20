@@ -1,7 +1,7 @@
 """
 foldr.models
 ~~~~~~~~~~~~
-Shared data structures for FOLDR v4.
+Shared data structures for FOLDR v0.2.1
 All dataclasses live here so every module imports from one place.
 """
 from __future__ import annotations
