@@ -8,7 +8,7 @@
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/foldr?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLUE&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/foldr)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/qasimio/Foldr)
-[![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-pink?logo=github)](https://github.com/sponsors/qasimio)
+[![Support on Patreon](https://img.shields.io/badge/Patreon-Support-orange)](https://patreon.com/qasimio)
 
 **Smart, safe, cross-platform CLI file organizer.**
 
@@ -256,11 +256,11 @@ foldr ~/Downloads --no-ignore
 
 ---
 
-## Support
+## 💖 Support
 
-If FOLDR saves you time, consider supporting continued development:
+If FOLDR saves you time or improves your workflow, consider supporting its continued development and maintenance:
 
-❤️ [github.com/sponsors/qasimio](https://github.com/sponsors/qasimio)
+[![Support on Patreon](https://img.shields.io/badge/Patreon-qasimio-F96854?style=for-the-badge&logo=patreon&logoColor=white)](https://patreon.com/qasimio)
 
 ---
 
