@@ -53,6 +53,14 @@ foldr watch ~/Downloads
 
 ---
 
+<h2 align="center">Preview</h2>
+
+<p align="center">
+  <img src="assets/foldr-preview.png" width="800"/>
+</p>
+
+---
+
 ## All Commands
 
 ### Organize
