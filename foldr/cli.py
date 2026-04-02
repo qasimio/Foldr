@@ -754,7 +754,6 @@ def main() -> None:
     _SUBCMDS = {"watch","unwatch","watches","undo","history","config","_watch-daemon"}
     sub = next((a for a in raw if not a.startswith("-") and a in _SUBCMDS), None)
 
-    _banner()
     parser = _build_parser()
     args, _ = parser.parse_known_args(raw)
 
