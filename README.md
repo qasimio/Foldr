@@ -31,6 +31,26 @@ https://docs.qasimio.me/docs/foldr/start-here
 
 ---
 
+<h2 align="center">Preview</h2>
+
+<p align="center">
+  <img src="assets/foldr-preview.png" width="800"/>
+</p>
+
+---
+
+## Installation
+
+```bash
+pip install foldr
+```
+
+Requires Python 3.10+. Works on **Windows**, **Linux**, **macOS**
+
+---
+
+
+
 ## Why FOLDR?
 
 Every Downloads folder eventually turns a junk drawer.
@@ -51,23 +71,6 @@ Automation should save time, not create anxiety.
 
 ---
 
-<h2 align="center">Preview</h2>
-
-<p align="center">
-  <img src="assets/foldr-preview.png" width="800"/>
-</p>
-
----
-
-## Installation
-
-```bash
-pip install foldr
-```
-
-Requires Python 3.10+. Works on **Windows**, **Linux**, **macOS**
-
----
 
 ## Quick Start
 
