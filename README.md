@@ -10,10 +10,12 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 
-**Your Filesystem on Autopilot.**
+**You will never Oganize your files manually.**
 
 <p align="center">
+  
 **7,000+ installs • 57 GitHub stars • Used daily by students & developers**
+
 </p>
 
 FOLDR is a cross-platform file automation CLI that organizes messy directories in seconds.
@@ -22,7 +24,7 @@ Preview every action before anything moves. Undo any operation instantly. Keep f
 
 Built for developers, students, creators, and anyone tired of organizing files by hand.
 
-📖 Documentation
+**📖 Documentation**
 https://docs.qasimio.me/docs/foldr/start-here
 
 </div>
@@ -31,7 +33,7 @@ https://docs.qasimio.me/docs/foldr/start-here
 
 ## Why FOLDR?
 
-Every Downloads folder eventually becomes a junk drawer.
+Every Downloads folder eventually turns a junk drawer.
 
 Duplicates. Screenshots. PDFs. ZIP files. Random installers.
 
@@ -111,6 +113,12 @@ Looking for detailed guides, advanced usage, and examples?
 - **Conflict-safe** — if a file with the same name already exists at the destination, FOLDR renames the incoming file (`photo_(1).jpg`, etc.) rather than overwriting.
 - **Undo anything** — every operation is reversible via `foldr undo`.
 - **Dedup is the only irreversible action** — always use `--preview` before `--dedup`.
+
+
+If you've found a security vulnerability, please don't open a public issue.
+
+Report it privately at:
+**security@qasimio.me**
 
 ---
 
