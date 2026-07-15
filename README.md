@@ -17,6 +17,10 @@
 
 FOLDR cleans messy directories by sorting files into category folders — instantly, predictably, and safely. Preview every action before anything moves. Undo anything. Watch a folder and keep it tidy automatically.
 
+<br>
+7,000+ installs •  57⭐ •  Used daily by students & developers.
+<br>
+
 </div>
 
 ---
@@ -26,16 +30,6 @@ FOLDR cleans messy directories by sorting files into category folders — instan
 <p align="center">
   <img src="assets/foldr-preview.png" width="800"/>
 </p>
-
----
-
-## Installation
-
-```bash
-pip install foldr
-```
-
-Requires Python 3.10+. Works on **Windows**, **Linux**, **macOS**
 
 ---
 
@@ -65,6 +59,17 @@ Done?
 Continue with the complete documentation:
 https://docs.qasimio.me/docs/foldr/start-here
 ```
+
+---
+
+## Installation
+
+```bash
+pip install foldr
+```
+
+Requires Python 3.10+. Works on **Windows**, **Linux**, **macOS**
+
 ---
 
 ## Documentation
@@ -85,18 +90,6 @@ Looking for detailed guides, advanced usage, and examples?
 
 ---
 
-## Star History
-
-<a href="https://www.star-history.com/?repos=qasimio%2FFOLDR&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=qasimio/FOLDR&type=date&theme=dark&legend=top-left&sealed_token=nRvWhSFeLGr0geFLPrNTsGQ4Z-SGfTeO5_g56Vm1QCMzt33eD8o-BTaTJU12u3HJSN-7Rr-7mPjy5dCL0n5zCDaLw2BxUjcU_oIjtUO8M1fKPiKWD4BsvA" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=qasimio/FOLDR&type=date&legend=top-left&sealed_token=nRvWhSFeLGr0geFLPrNTsGQ4Z-SGfTeO5_g56Vm1QCMzt33eD8o-BTaTJU12u3HJSN-7Rr-7mPjy5dCL0n5zCDaLw2BxUjcU_oIjtUO8M1fKPiKWD4BsvA" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=qasimio/FOLDR&type=date&legend=top-left&sealed_token=nRvWhSFeLGr0geFLPrNTsGQ4Z-SGfTeO5_g56Vm1QCMzt33eD8o-BTaTJU12u3HJSN-7Rr-7mPjy5dCL0n5zCDaLw2BxUjcU_oIjtUO8M1fKPiKWD4BsvA" />
- </picture>
-</a>
-
----
-
 ## 💖 Support
 
 If FOLDR saves you time or improves your workflow, consider supporting its continued development and maintenance:
@@ -109,6 +102,7 @@ If FOLDR saves you time or improves your workflow, consider supporting its conti
 
 **Muhammad Qasim**
 [qasimio.me](https://qasimio.me)
+[Github](https://github.com/qasimio)
 <br>
 LinkedIn: [linkedin.com/in/qasimio](https://www.linkedin.com/in/qasimio/)
 
@@ -117,3 +111,15 @@ LinkedIn: [linkedin.com/in/qasimio](https://www.linkedin.com/in/qasimio/)
 ## License
 
 [MIT](LICENSE)
+
+---
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=qasimio%2FFOLDR&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=qasimio/FOLDR&type=date&theme=dark&legend=top-left&sealed_token=nRvWhSFeLGr0geFLPrNTsGQ4Z-SGfTeO5_g56Vm1QCMzt33eD8o-BTaTJU12u3HJSN-7Rr-7mPjy5dCL0n5zCDaLw2BxUjcU_oIjtUO8M1fKPiKWD4BsvA" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=qasimio/FOLDR&type=date&legend=top-left&sealed_token=nRvWhSFeLGr0geFLPrNTsGQ4Z-SGfTeO5_g56Vm1QCMzt33eD8o-BTaTJU12u3HJSN-7Rr-7mPjy5dCL0n5zCDaLw2BxUjcU_oIjtUO8M1fKPiKWD4BsvA" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=qasimio/FOLDR&type=date&legend=top-left&sealed_token=nRvWhSFeLGr0geFLPrNTsGQ4Z-SGfTeO5_g56Vm1QCMzt33eD8o-BTaTJU12u3HJSN-7Rr-7mPjy5dCL0n5zCDaLw2BxUjcU_oIjtUO8M1fKPiKWD4BsvA" />
+ </picture>
+</a>
