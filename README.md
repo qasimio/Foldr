@@ -14,7 +14,7 @@
 
 <p align="center">
   
-**7,000+ installs • 57 GitHub stars • Used daily by students & developers**
+**7,000+ installs •  75+ GitHub stars • Used daily by students & developers**
 
 </p>
 
